@@ -1,5 +1,5 @@
 using B2B.Dao.Contexts;
-using B2B.Dao.Entities;
+using B2B.Dao.Mappings;
 using B2B.Dao.Repositories.Interfaces;
 using B2B.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -25,17 +25,4 @@ public sealed class UserRepository(B2BDbContext dbContext) : IUserRepository
 
         return entity?.ToModel();
     }
-}
-
-internal static class UserEntityMapping
-{
-    public static UserDomain ToModel(this UserEntity entity) => new()
-    {
-        UserId = entity.UserId,
-        Account = entity.Account,
-        DisplayName = entity.DisplayName,
-        PasswordHash = entity.PasswordHash,
-        IsActive = entity.IsActive,
-        CreatedAt = entity.CreatedAt
-    };
 }
