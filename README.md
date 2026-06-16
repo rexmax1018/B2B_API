@@ -1,6 +1,6 @@
 # B2B_API
 
-.NET 10 WebAPI 多層式架構範例，包含 Oracle 19c + EF Core、JWT、Refresh Token Rotation、全域例外處理、Transaction Log、NLog 與 Swagger。
+.NET 10 WebAPI 多層式架構範例，包含 Oracle 19c + EF Core、JWT、Refresh Token、全域例外處理、Transaction Log、NLog 與 Swagger。
 
 ## 專案架構
 
@@ -44,17 +44,15 @@ https://localhost:<port>/swagger
 
 ## Oracle Connection String
 
-設定位置：`B2B.WebApi/appsettings.json`
+設定 key：`ConnectionStrings:DefaultConnection`
 
-```json
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "User Id=B2B_USER;Password=B2B_PASSWORD;Data Source=localhost:1521/ORCLPDB1;"
-  }
-}
+請透過 Secret Manager、環境變數或正式機密管理服務注入，不要將含密碼的 connection string commit 到 repository。
+
+```powershell
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "<oracle-connection-string>" --project B2B.WebApi/B2B.WebApi.csproj
 ```
 
-目前預設 `DataAccess:UseFakeRepositories` 為 `true`，方便未連 Oracle 時直接測試 API。正式接 Oracle 時請改為：
+正式接 Oracle 時請設定：
 
 ```json
 {
@@ -64,21 +62,17 @@ https://localhost:<port>/swagger
 }
 ```
 
+非 Development 環境若啟用 `DataAccess:UseFakeRepositories`，應用程式會在啟動時中止。
+
 ## JWT 設定
 
-```json
-{
-  "Jwt": {
-    "Issuer": "B2B_API",
-    "Audience": "B2B_API_CLIENT",
-    "SecretKey": "PLEASE_CHANGE_THIS_SECRET_KEY_TO_AT_LEAST_32_CHARS",
-    "AccessTokenMinutes": 60,
-    "RefreshTokenDays": 7
-  }
-}
+`Jwt:Issuer`、`Jwt:Audience`、token 期限可放在一般設定檔；`Jwt:SecretKey` 必須透過安全設定來源注入。
+
+```powershell
+dotnet user-secrets set "Jwt:SecretKey" "<strong-random-secret>" --project B2B.WebApi/B2B.WebApi.csproj
 ```
 
-正式環境請改用 Secret Manager、環境變數或安全機密管理服務保存 `SecretKey`。
+若 `Jwt:SecretKey` 為空白或仍為 placeholder，應用程式會在啟動時中止。
 
 ## Transaction Log
 
@@ -86,14 +80,15 @@ https://localhost:<port>/swagger
 {
   "TransactionLog": {
     "Enabled": true,
-    "IncludeRequestBody": true,
-    "IncludeResponseBody": true,
+    "IncludeRequestBody": false,
+    "IncludeResponseBody": false,
+    "TrustForwardedHeaders": false,
     "MaxBodyLogLength": 10000
   }
 }
 ```
 
-Middleware 會記錄 TraceId、HTTP method、path、query string、status code、request/response body、client IP、UserAgent、耗時與時間戳。client IP 會優先取 `X-Forwarded-For` 第一個 IP，其次取 `X-Real-IP`，最後回退到連線的 remote IP。敏感欄位如 `password`、`accessToken`、`refreshToken`、`token`、`authorization` 會遮罩。
+Middleware 會記錄 TraceId、HTTP method、path、query string、status code、client IP、UserAgent、耗時與時間戳。request/response body 預設不記錄；非 Development 環境若開啟 body logging，應用程式會在啟動時中止。敏感欄位如 `password`、`accessToken`、`refreshToken`、`token`、`authorization` 會遮罩。client IP 預設使用連線來源；只有在明確設定 `TrustForwardedHeaders` 時才會讀取 `X-Forwarded-For` / `X-Real-IP`。
 
 ## NLog Log 位置
 
@@ -111,25 +106,25 @@ B2B.WebApi/logs/
 Health：
 
 ```http
-GET /api/health
+GET /Health
 ```
 
 Login：
 
 ```http
-POST /api/auth/login
+POST /Auth/login
 Content-Type: application/json
 
 {
   "account": "admin",
-  "password": "123456"
+  "password": "<password>"
 }
 ```
 
 Refresh Token：
 
 ```http
-POST /api/auth/refresh-token
+POST /Auth/refresh-token
 Content-Type: application/json
 
 {
@@ -140,7 +135,8 @@ Content-Type: application/json
 ## 正式環境建議
 
 - 將 `DataAccess:UseFakeRepositories` 改為 `false` 並建立正式 Oracle schema。
-- 將測試密碼驗證替換為 BCrypt、Argon2 或 PBKDF2。
+- 使用 PBKDF2、BCrypt 或 Argon2 儲存密碼雜湊，不保存明文密碼。
 - 將 `Jwt:SecretKey` 移至安全機密管理。
+- 若需要 Refresh Token Rotation，新增 refresh token persistence、撤銷、重用偵測與輪替紀錄。
 - 依環境調整 NLog 保留天數、封存策略與集中式 log 收集。
 - 規劃 EF Core migration 或 DBA-controlled DDL 流程。

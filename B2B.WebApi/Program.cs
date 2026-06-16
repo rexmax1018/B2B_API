@@ -23,9 +23,12 @@ try
     builder.Services
         .AddB2BOptions(builder.Configuration)
         .AddB2BAuthentication(builder.Configuration)
+        .AddB2BRateLimiting()
         .AddB2BSwagger();
 
     var app = builder.Build();
+
+    SecurityConfigurationValidator.Validate(app);
 
     app.Lifetime.ApplicationStarted.Register(() =>
         logger.Info(
@@ -40,15 +43,25 @@ try
     app.Lifetime.ApplicationStopped.Register(() =>
         logger.Info("B2B_API stopped."));
 
+    if (!app.Environment.IsDevelopment())
+    {
+        app.UseHsts();
+    }
+
+    app.UseB2BSecurityHeaders();
     app.UseB2BExceptionHandling();
     app.UseB2BTransactionLog();
 
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI();
+    }
 
     app.UseHttpsRedirection();
     app.UseAuthentication();
     app.UseAuthorization();
+    app.UseRateLimiter();
 
     app.MapControllers();
 

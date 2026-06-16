@@ -69,7 +69,7 @@ public sealed partial class TransactionLogMiddleware(
                 context.Response.StatusCode,
                 RequestBody = requestBody,
                 ResponseBody = responseBodyText,
-                ClientIp = GetClientIp(context),
+                ClientIp = GetClientIp(context, currentOptions),
                 UserAgent = context.Request.Headers.UserAgent.ToString(),
                 ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
                 RequestTime = requestTime,
@@ -180,11 +180,16 @@ public sealed partial class TransactionLogMiddleware(
         }
     }
 
-    private static string? GetClientIp(HttpContext context)
+    private static string? GetClientIp(HttpContext context, TransactionLogOptions options)
     {
-        return GetFirstHeaderValue(context, "X-Forwarded-For")
-            ?? GetFirstHeaderValue(context, "X-Real-IP")
-            ?? context.Connection.RemoteIpAddress?.ToString();
+        if (options.TrustForwardedHeaders)
+        {
+            return GetFirstHeaderValue(context, "X-Forwarded-For")
+                ?? GetFirstHeaderValue(context, "X-Real-IP")
+                ?? context.Connection.RemoteIpAddress?.ToString();
+        }
+
+        return context.Connection.RemoteIpAddress?.ToString();
     }
 
     private static string? GetFirstHeaderValue(HttpContext context, string headerName)

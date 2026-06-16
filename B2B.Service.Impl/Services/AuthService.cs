@@ -1,15 +1,17 @@
+using System.Security.Cryptography;
 using B2B.Dao.Repositories.Interfaces;
 using B2B.Domain;
 using B2B.Service.Interfaces;
-using Microsoft.Extensions.Configuration;
 
 namespace B2B.Service.Impl.Services;
 
 public sealed class AuthService(
     IUserRepository userRepository,
-    ITokenService tokenService,
-    IConfiguration configuration) : IAuthService
+    ITokenService tokenService) : IAuthService
 {
+    private const int MinPbkdf2Iterations = 100_000;
+    private const int ExpectedPbkdf2Parts = 4;
+
     public async Task<LoginResultDomain> LoginAsync(
         string account,
         string password,
@@ -24,15 +26,7 @@ public sealed class AuthService(
             return LoginResultDomain.Succeeded(user, token);
         }
 
-        if (!IsDirectJwtIssueEnabled())
-        {
-            return LoginResultDomain.Failed("帳號或密碼錯誤");
-        }
-
-        var directUser = CreateDirectJwtUser(account, user);
-        var directToken = tokenService.GenerateToken(directUser);
-
-        return LoginResultDomain.Succeeded(directUser, directToken);
+        return LoginResultDomain.Failed("帳號或密碼錯誤");
     }
 
     public async Task<LoginResultDomain> RefreshTokenAsync(
@@ -60,48 +54,36 @@ public sealed class AuthService(
 
     private static bool VerifyPassword(string password, string storedPasswordHash)
     {
-        if (storedPasswordHash.StartsWith("PLAIN:", StringComparison.Ordinal))
+        var parts = storedPasswordHash.Split(':', ExpectedPbkdf2Parts);
+
+        if (parts.Length != ExpectedPbkdf2Parts ||
+            !string.Equals(parts[0], "PBKDF2-SHA256", StringComparison.Ordinal) ||
+            !int.TryParse(parts[1], out var iterations) ||
+            iterations < MinPbkdf2Iterations)
         {
-            return string.Equals(
+            return false;
+        }
+
+        try
+        {
+            var salt = Convert.FromBase64String(parts[2]);
+            var expectedHash = Convert.FromBase64String(parts[3]);
+            var actualHash = Rfc2898DeriveBytes.Pbkdf2(
                 password,
-                storedPasswordHash["PLAIN:".Length..],
-                StringComparison.Ordinal);
+                salt,
+                iterations,
+                HashAlgorithmName.SHA256,
+                expectedHash.Length);
+
+            return CryptographicOperations.FixedTimeEquals(actualHash, expectedHash);
         }
-
-        // 預留正式環境替換點：可改為 BCrypt/Argon2/PBKDF2 等雜湊驗證。
-        return string.Equals(password, storedPasswordHash, StringComparison.Ordinal);
-    }
-
-    private bool IsDirectJwtIssueEnabled() =>
-        bool.TryParse(configuration["Authentication:EnableDirectJwtIssue"], out var enabled) && enabled;
-
-    private UserDomain CreateDirectJwtUser(string account, UserDomain? existingUser)
-    {
-        if (existingUser is not null)
+        catch (FormatException)
         {
-            return new UserDomain
-            {
-                UserId = existingUser.UserId,
-                Account = existingUser.Account,
-                DisplayName = existingUser.DisplayName,
-                PasswordHash = existingUser.PasswordHash,
-                IsActive = true,
-                CreatedAt = existingUser.CreatedAt
-            };
+            return false;
         }
-
-        return new UserDomain
+        catch (ArgumentException)
         {
-            UserId = ReadLong(configuration["Authentication:DirectJwtUserId"], 1),
-            Account = account,
-            DisplayName = configuration["Authentication:DirectJwtDisplayName"] ?? account,
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow
-        };
-    }
-
-    private static long ReadLong(string? value, long defaultValue)
-    {
-        return long.TryParse(value, out var parsedValue) ? parsedValue : defaultValue;
+            return false;
+        }
     }
 }

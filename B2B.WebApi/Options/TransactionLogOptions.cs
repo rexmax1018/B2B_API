@@ -8,9 +8,11 @@ public sealed class TransactionLogOptions
 
     public bool Enabled { get; set; } = true;
 
-    public bool IncludeRequestBody { get; set; } = true;
+    public bool IncludeRequestBody { get; set; }
 
-    public bool IncludeResponseBody { get; set; } = true;
+    public bool IncludeResponseBody { get; set; }
+
+    public bool TrustForwardedHeaders { get; set; }
 
     [Range(100, 1_000_000)]
     public int MaxBodyLogLength { get; set; } = 10000;

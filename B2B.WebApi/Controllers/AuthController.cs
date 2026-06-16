@@ -4,12 +4,14 @@ using B2B.WebApi.Model.Auth;
 using B2B.WebApi.Model.Common;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace B2B.WebApi.Controllers;
 
 [ApiController]
 [Route("[controller]")]
 [AllowAnonymous]
+[EnableRateLimiting("Auth")]
 public sealed class AuthController(IAuthService authService) : ControllerBase
 {
     [HttpPost("login")]

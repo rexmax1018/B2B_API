@@ -12,8 +12,7 @@ public sealed class InMemoryUserRepository : IUserRepository
             UserId = 1,
             Account = "admin",
             DisplayName = "Administrator",
-            // 開發測試用：正式環境請改由安全雜湊演算法與鹽值保存密碼。
-            PasswordHash = "PLAIN:123456",
+            PasswordHash = "PBKDF2-SHA256:100000:AQIDBAUGBwgJCgsMDQ4PEA==:4GqoH/SqHM86aKvYpt8G51CnwfVCN1AY5DjzvwZFMtI=",
             IsActive = true,
             CreatedAt = DateTime.UtcNow
         }

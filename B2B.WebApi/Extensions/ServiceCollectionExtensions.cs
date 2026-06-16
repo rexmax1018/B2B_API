@@ -1,5 +1,7 @@
 using B2B.WebApi.Options;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.OpenApi;
+using System.Threading.RateLimiting;
 
 namespace B2B.WebApi.Extensions;
 
@@ -18,6 +20,22 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(TransactionLogOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        return services;
+    }
+
+    public static IServiceCollection AddB2BRateLimiting(this IServiceCollection services)
+    {
+        services.AddRateLimiter(options =>
+        {
+            options.AddFixedWindowLimiter("Auth", limiterOptions =>
+            {
+                limiterOptions.PermitLimit = 5;
+                limiterOptions.Window = TimeSpan.FromMinutes(1);
+                limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+                limiterOptions.QueueLimit = 0;
+            });
+        });
 
         return services;
     }

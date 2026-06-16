@@ -1,10 +1,12 @@
 using B2B.WebApi.Model.Common;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace B2B.WebApi.Controllers;
 
 [ApiController]
 [Route("[controller]")]
+[AllowAnonymous]
 public sealed class HealthController : ControllerBase
 {
     [HttpGet]
