@@ -4,6 +4,12 @@ using B2B.WebApi.Model.Common;
 
 namespace B2B.WebApi.Middlewares;
 
+/// <summary>
+/// 捕捉未處理例外並輸出標準 API 錯誤回應。
+/// </summary>
+/// <param name="next">下一個 middleware。</param>
+/// <param name="logger">例外記錄器。</param>
+/// <param name="environment">主機環境。</param>
 public sealed class ExceptionHandlingMiddleware(
     RequestDelegate next,
     ILogger<ExceptionHandlingMiddleware> logger,
@@ -11,6 +17,10 @@ public sealed class ExceptionHandlingMiddleware(
 {
     private static readonly JsonSerializerOptions JsonSerializerOptions = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// 執行全域例外處理流程。
+    /// </summary>
+    /// <param name="context">HTTP 內容。</param>
     public async Task InvokeAsync(HttpContext context)
     {
         try
@@ -21,7 +31,7 @@ public sealed class ExceptionHandlingMiddleware(
         {
             logger.LogError(
                 ex,
-                "Unhandled exception. TraceId: {TraceId}, Path: {Path}, Environment: {Environment}",
+                "發生未處理例外。追蹤編號：{TraceId}，路徑：{Path}，環境：{Environment}",
                 context.TraceIdentifier,
                 context.Request.Path,
                 environment.EnvironmentName);

@@ -5,8 +5,17 @@ using System.Threading.RateLimiting;
 
 namespace B2B.WebApi.Extensions;
 
+/// <summary>
+/// 提供 B2B API 服務註冊擴充方法。
+/// </summary>
 public static class ServiceCollectionExtensions
 {
+    /// <summary>
+    /// 加入選項設定與記憶體快取。
+    /// </summary>
+    /// <param name="services">服務集合。</param>
+    /// <param name="configuration">應用程式設定。</param>
+    /// <returns>服務集合。</returns>
     public static IServiceCollection AddB2BOptions(
         this IServiceCollection services,
         IConfiguration configuration)
@@ -21,9 +30,16 @@ public static class ServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddMemoryCache();
+
         return services;
     }
 
+    /// <summary>
+    /// 加入 API 速率限制設定。
+    /// </summary>
+    /// <param name="services">服務集合。</param>
+    /// <returns>服務集合。</returns>
     public static IServiceCollection AddB2BRateLimiting(this IServiceCollection services)
     {
         services.AddRateLimiter(options =>
@@ -40,6 +56,11 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>
+    /// 加入控制器、端點探索與 Swagger 文件設定。
+    /// </summary>
+    /// <param name="services">服務集合。</param>
+    /// <returns>服務集合。</returns>
     public static IServiceCollection AddB2BSwagger(this IServiceCollection services)
     {
         services.AddControllers();

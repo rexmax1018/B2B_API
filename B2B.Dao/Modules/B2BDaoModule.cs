@@ -7,8 +7,15 @@ using Microsoft.Extensions.Configuration;
 
 namespace B2B.Dao.Modules;
 
+/// <summary>
+/// 註冊資料存取層所需的 Autofac 服務。
+/// </summary>
 public sealed class B2BDaoModule : Autofac.Module
 {
+    /// <summary>
+    /// 註冊資料庫連線設定、DbContext 與使用者資料存取實作。
+    /// </summary>
+    /// <param name="builder">Autofac 容器建構器。</param>
     protected override void Load(ContainerBuilder builder)
     {
         builder.Register(context =>
@@ -18,7 +25,7 @@ public sealed class B2BDaoModule : Autofac.Module
 
                 if (string.IsNullOrWhiteSpace(connectionString))
                 {
-                    throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
+                    throw new InvalidOperationException("必須設定 ConnectionStrings:DefaultConnection。");
                 }
 
                 return new B2BDaoOptions

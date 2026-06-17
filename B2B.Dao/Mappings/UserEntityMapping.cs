@@ -4,8 +4,15 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace B2B.Dao.Mappings;
 
+/// <summary>
+/// 設定使用者實體與資料表欄位的對應。
+/// </summary>
 internal sealed class UserEntityMapping : IEntityTypeConfiguration<UserEntity>
 {
+    /// <summary>
+    /// 設定使用者實體的資料表、欄位、主鍵與索引對應。
+    /// </summary>
+    /// <param name="entity">使用者實體型別建構器。</param>
     public void Configure(EntityTypeBuilder<UserEntity> entity)
     {
         entity.ToTable("B2B_USER");

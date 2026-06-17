@@ -1,6 +1,6 @@
 # B2B_API
 
-.NET 10 WebAPI 多層式架構範例，包含 Oracle 19c + EF Core、JWT、Refresh Token、全域例外處理、Transaction Log、NLog 與 Swagger。
+.NET 10 WebAPI 多層式架構範例，包含 Oracle 19c + EF Core、JWT Access Token、MemoryCache Refresh Token、全域例外處理、Transaction Log、NLog 與 Swagger。
 
 ## 專案架構
 
@@ -19,7 +19,7 @@ B2B.WebApi.Model/
 - `B2B.Domain`：Service 與 Dao 之間共用的 Domain Model。
 - `B2B.Dao`：EF Core DbContext、Oracle Entity Mapping、Repository。
 - `B2B.Service`：Service interface。
-- `B2B.Service.Impl`：JWT、Refresh Token、登入流程與使用者服務實作。
+- `B2B.Service.Impl`：JWT Access Token、MemoryCache Refresh Token、登入流程與使用者服務實作。
 - `B2B.WebApi.Model`：對外 Request / Response DTO 與統一 API 回應格式。
 - `B2B.WebApi`：Controller、Middleware、DI、Swagger、NLog、設定檔與 API 入口。
 
@@ -66,13 +66,27 @@ dotnet user-secrets set "ConnectionStrings:DefaultConnection" "<oracle-connectio
 
 ## JWT 設定
 
-`Jwt:Issuer`、`Jwt:Audience`、token 期限可放在一般設定檔；`Jwt:SecretKey` 必須透過安全設定來源注入。
+Access Token 使用 JWT，採 stateless 設計，不儲存在資料庫。`Jwt:Issuer`、`Jwt:Audience`、token 期限可放在一般設定檔；`Jwt:SecretKey` 必須透過安全設定來源注入。
 
 ```powershell
 dotnet user-secrets set "Jwt:SecretKey" "<strong-random-secret>" --project B2B.WebApi/B2B.WebApi.csproj
 ```
 
 若 `Jwt:SecretKey` 為空白或仍為 placeholder，應用程式會在啟動時中止。
+
+## Refresh Token Store
+
+Refresh Token 使用 `IMemoryCache` 儲存，不寫入 Oracle，也不需要 Refresh Token 資料表或 Repository。Cache key 會使用 Refresh Token 的 SHA256 hash 組成，不直接使用明文 token。
+
+```json
+{
+  "RefreshTokenStore": {
+    "Provider": "Memory"
+  }
+}
+```
+
+WebAPI 重啟後 MemoryCache 會清空，原本核發的 Refresh Token 會失效，使用者需要重新登入。MemoryCache 適合開發環境與單機部署；若正式環境有多台 WebAPI，應改用 Redis / Distributed Cache 或資料庫儲存 Refresh Token，確保多節點之間狀態一致。
 
 ## Transaction Log
 
@@ -112,7 +126,7 @@ GET /Health
 Login：
 
 ```http
-POST /Auth/login
+POST /api/auth/login
 Content-Type: application/json
 
 {
@@ -124,7 +138,18 @@ Content-Type: application/json
 Refresh Token：
 
 ```http
-POST /Auth/refresh-token
+POST /api/auth/refresh-token
+Content-Type: application/json
+
+{
+  "refreshToken": "<login response refreshToken>"
+}
+```
+
+Logout：
+
+```http
+POST /api/auth/logout
 Content-Type: application/json
 
 {
@@ -137,6 +162,6 @@ Content-Type: application/json
 - 將 `DataAccess:UseFakeRepositories` 改為 `false` 並建立正式 Oracle schema。
 - 使用 PBKDF2、BCrypt 或 Argon2 儲存密碼雜湊，不保存明文密碼。
 - 將 `Jwt:SecretKey` 移至安全機密管理。
-- 若需要 Refresh Token Rotation，新增 refresh token persistence、撤銷、重用偵測與輪替紀錄。
+- 多台 WebAPI 部署時，將 Refresh Token Store 從 MemoryCache 改為 Redis / Distributed Cache 或資料庫。
 - 依環境調整 NLog 保留天數、封存策略與集中式 log 收集。
 - 規劃 EF Core migration 或 DBA-controlled DDL 流程。

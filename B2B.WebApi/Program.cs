@@ -9,7 +9,7 @@ var logger = LogManager.Setup().LoadConfigurationFromFile("nlog.config").GetCurr
 
 try
 {
-    logger.Info("B2B_API is starting.");
+    logger.Info("B2B_API 正在啟動。");
 
     var builder = WebApplication.CreateBuilder(args);
 
@@ -32,16 +32,16 @@ try
 
     app.Lifetime.ApplicationStarted.Register(() =>
         logger.Info(
-            "B2B_API started. Environment: {0}; ContentRoot: {1}; URLs: {2}",
+            "B2B_API 已啟動。環境：{0}；內容根目錄：{1}；URL：{2}",
             app.Environment.EnvironmentName,
             app.Environment.ContentRootPath,
             string.Join(", ", app.Urls)));
 
     app.Lifetime.ApplicationStopping.Register(() =>
-        logger.Info("B2B_API is stopping."));
+        logger.Info("B2B_API 正在停止。"));
 
     app.Lifetime.ApplicationStopped.Register(() =>
-        logger.Info("B2B_API stopped."));
+        logger.Info("B2B_API 已停止。"));
 
     if (!app.Environment.IsDevelopment())
     {
@@ -69,10 +69,15 @@ try
 }
 catch (Exception ex)
 {
-    logger.Fatal(ex, "B2B_API stopped unexpectedly.");
+    logger.Fatal(ex, "B2B_API 非預期停止。");
     throw;
 }
 finally
 {
     LogManager.Shutdown();
 }
+
+/// <summary>
+/// ASP.NET Core 應用程式進入點，供整合測試建立主機使用。
+/// </summary>
+public partial class Program;
