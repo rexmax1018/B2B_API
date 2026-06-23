@@ -1,6 +1,6 @@
 # B2B_API
 
-.NET 10 WebAPI 多層式架構範例，包含 Oracle 19c + EF Core、JWT Access Token、MemoryCache Refresh Token、全域例外處理、Transaction Log、NLog 與 Swagger。
+.NET 10 WebAPI 多層式架構範例，包含 Oracle 19c + EF Core、JWT Access Token、MemoryCache Refresh Token、分區速率限制、全域例外處理、Health Check、Transaction Log、NLog 與 Swagger。
 
 ## 專案架構
 
@@ -76,7 +76,7 @@ dotnet user-secrets set "Jwt:SecretKey" "<strong-random-secret>" --project B2B.W
 
 ## Refresh Token Store
 
-Refresh Token 使用 `IMemoryCache` 儲存，不寫入 Oracle，也不需要 Refresh Token 資料表或 Repository。Cache key 會使用 Refresh Token 的 SHA256 hash 組成，不直接使用明文 token。
+Refresh Token 使用 `IMemoryCache` 儲存，不寫入 Oracle，也不需要 Refresh Token 資料表或 Repository。Cache key 會使用 Refresh Token 的 SHA256 hash 組成，不直接使用明文 token。換發 Refresh Token 時會以原子方式 consume 舊 token，避免同一個 Refresh Token 在併發請求下被重複換發。
 
 ```json
 {
@@ -86,7 +86,22 @@ Refresh Token 使用 `IMemoryCache` 儲存，不寫入 Oracle，也不需要 Ref
 }
 ```
 
-WebAPI 重啟後 MemoryCache 會清空，原本核發的 Refresh Token 會失效，使用者需要重新登入。MemoryCache 適合開發環境與單機部署；若正式環境有多台 WebAPI，應改用 Redis / Distributed Cache 或資料庫儲存 Refresh Token，確保多節點之間狀態一致。
+WebAPI 重啟後 MemoryCache 會清空，原本核發的 Refresh Token 會失效，使用者需要重新登入。目前規劃為單一 API 機器，因此持續使用 MemoryCache；若未來改為多台 WebAPI，應改用 Redis / Distributed Cache 或資料庫儲存 Refresh Token，確保多節點之間狀態一致。
+
+## Auth Rate Limit
+
+Auth Controller 套用 `Auth` rate limit policy，依用戶端 IP 與 User-Agent 建立分區，每個分區每分鐘允許 5 次請求，超過時回傳標準 `ApiResponse`：
+
+```json
+{
+  "success": false,
+  "message": "請求過於頻繁，請稍後再試",
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "請求過於頻繁，請稍後再試"
+  }
+}
+```
 
 ## Transaction Log
 
@@ -122,6 +137,20 @@ Health：
 ```http
 GET /Health
 ```
+
+Liveness：
+
+```http
+GET /health/live
+```
+
+Readiness：
+
+```http
+GET /health/ready
+```
+
+`/health/ready` 會檢查 Oracle 連線，適合部署平台判斷服務是否已可承接流量。
 
 Login：
 
@@ -162,6 +191,6 @@ Content-Type: application/json
 - 將 `DataAccess:UseFakeRepositories` 改為 `false` 並建立正式 Oracle schema。
 - 使用 PBKDF2、BCrypt 或 Argon2 儲存密碼雜湊，不保存明文密碼。
 - 將 `Jwt:SecretKey` 移至安全機密管理。
-- 多台 WebAPI 部署時，將 Refresh Token Store 從 MemoryCache 改為 Redis / Distributed Cache 或資料庫。
+- 單機部署可持續使用 MemoryCache Refresh Token Store；多台 WebAPI 部署時，將 Refresh Token Store 從 MemoryCache 改為 Redis / Distributed Cache 或資料庫。
 - 依環境調整 NLog 保留天數、封存策略與集中式 log 收集。
 - 規劃 EF Core migration 或 DBA-controlled DDL 流程。

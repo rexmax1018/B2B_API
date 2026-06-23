@@ -172,6 +172,29 @@ internal sealed class SpyRefreshTokenStore : IRefreshTokenStore
     }
 
     /// <summary>
+    /// 從測試儲存區取得並移除 Refresh Token。
+    /// </summary>
+    /// <param name="refreshToken">Refresh Token。</param>
+    /// <param name="cancellationToken">取消權杖。</param>
+    /// <returns>Refresh Token 資料；找不到時為 <see langword="null"/>。</returns>
+    public Task<RefreshTokenModel?> ConsumeAsync(
+        string refreshToken,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!tokens.TryGetValue(refreshToken, out var model))
+        {
+            return Task.FromResult<RefreshTokenModel?>(null);
+        }
+
+        RemovedTokens.Add(refreshToken);
+        tokens.Remove(refreshToken);
+
+        return Task.FromResult<RefreshTokenModel?>(Clone(model));
+    }
+
+    /// <summary>
     /// 從測試儲存區移除 Refresh Token 並記錄移除清單。
     /// </summary>
     /// <param name="refreshToken">Refresh Token。</param>

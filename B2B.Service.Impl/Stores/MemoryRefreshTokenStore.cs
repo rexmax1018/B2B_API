@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using B2B.Domain.Models;
@@ -12,6 +13,8 @@ namespace B2B.Service.Impl.Stores;
 /// <param name="memoryCache">記憶體快取。</param>
 public class MemoryRefreshTokenStore(IMemoryCache memoryCache) : IRefreshTokenStore
 {
+    private readonly ConcurrentDictionary<string, object> keyLocks = new();
+
     /// <summary>
     /// 將 Refresh Token 資料寫入記憶體快取。
     /// </summary>
@@ -49,11 +52,48 @@ public class MemoryRefreshTokenStore(IMemoryCache memoryCache) : IRefreshTokenSt
         string refreshToken,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var key = BuildKey(refreshToken);
 
         memoryCache.TryGetValue(key, out RefreshTokenModel? model);
 
         return Task.FromResult(model);
+    }
+
+    /// <summary>
+    /// 以原子方式從記憶體快取取得並移除 Refresh Token。
+    /// </summary>
+    /// <param name="refreshToken">Refresh Token。</param>
+    /// <param name="cancellationToken">取消權杖。</param>
+    /// <returns>Refresh Token 關聯資料；找不到時為 <see langword="null"/>。</returns>
+    public Task<RefreshTokenModel?> ConsumeAsync(
+        string refreshToken,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var key = BuildKey(refreshToken);
+        var keyLock = keyLocks.GetOrAdd(key, _ => new object());
+
+        lock (keyLock)
+        {
+            try
+            {
+                if (!memoryCache.TryGetValue(key, out RefreshTokenModel? model))
+                {
+                    return Task.FromResult<RefreshTokenModel?>(null);
+                }
+
+                memoryCache.Remove(key);
+
+                return Task.FromResult(model);
+            }
+            finally
+            {
+                keyLocks.TryRemove(key, out _);
+            }
+        }
     }
 
     /// <summary>
@@ -66,6 +106,8 @@ public class MemoryRefreshTokenStore(IMemoryCache memoryCache) : IRefreshTokenSt
         string refreshToken,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var key = BuildKey(refreshToken);
 
         memoryCache.Remove(key);

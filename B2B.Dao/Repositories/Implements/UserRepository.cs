@@ -20,9 +20,11 @@ public sealed class UserRepository(B2BDbContext dbContext) : IUserRepository
     /// <returns>使用者資料；找不到時為 <see langword="null"/>。</returns>
     public async Task<UserDomain?> GetByAccountAsync(string account, CancellationToken cancellationToken)
     {
+        var normalizedAccount = account.ToUpperInvariant();
+
         var entity = await dbContext.Users
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Account == account, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Account.ToUpper() == normalizedAccount, cancellationToken);
 
         return entity?.ToModel();
     }

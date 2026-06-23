@@ -59,7 +59,7 @@ public sealed class AuthService(
         string refreshToken,
         CancellationToken cancellationToken)
     {
-        var storedToken = await refreshTokenStore.GetAsync(refreshToken, cancellationToken);
+        var storedToken = await refreshTokenStore.ConsumeAsync(refreshToken, cancellationToken);
 
         if (storedToken is null)
         {
@@ -68,15 +68,11 @@ public sealed class AuthService(
 
         if (DateTime.UtcNow >= storedToken.ExpiresAt)
         {
-            await refreshTokenStore.RemoveAsync(refreshToken, cancellationToken);
-
             return LoginResultDomain.Failed(RefreshTokenInvalidMessage, RefreshTokenExpiredCode);
         }
 
         if (storedToken.IsRevoked)
         {
-            await refreshTokenStore.RemoveAsync(refreshToken, cancellationToken);
-
             return LoginResultDomain.Failed(RefreshTokenInvalidMessage, RefreshTokenRevokedCode);
         }
 
@@ -84,12 +80,8 @@ public sealed class AuthService(
 
         if (user is null || !user.IsActive)
         {
-            await refreshTokenStore.RemoveAsync(refreshToken, cancellationToken);
-
             return LoginResultDomain.Failed(RefreshTokenInvalidMessage, InvalidRefreshTokenCode);
         }
-
-        await refreshTokenStore.RemoveAsync(refreshToken, cancellationToken);
 
         var newToken = tokenService.GenerateToken(user);
         await SaveRefreshTokenAsync(user, newToken, cancellationToken);

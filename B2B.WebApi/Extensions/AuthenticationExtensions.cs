@@ -1,5 +1,5 @@
 using System.Text;
-using B2B.WebApi.Options;
+using B2B.Service.Options;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;

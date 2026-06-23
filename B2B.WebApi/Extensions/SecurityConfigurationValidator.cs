@@ -1,4 +1,4 @@
-using B2B.WebApi.Options;
+using B2B.Service.Options;
 using Microsoft.AspNetCore.Builder;
 
 namespace B2B.WebApi.Extensions;

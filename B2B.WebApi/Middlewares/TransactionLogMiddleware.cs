@@ -51,8 +51,14 @@ public sealed partial class TransactionLogMiddleware(
             : null;
 
         var originalResponseBody = context.Response.Body;
-        await using var responseBody = new MemoryStream();
-        context.Response.Body = responseBody;
+        await using var responseBody = currentOptions.IncludeResponseBody
+            ? new MemoryStream()
+            : null;
+
+        if (responseBody is not null)
+        {
+            context.Response.Body = responseBody;
+        }
 
         try
         {
@@ -62,13 +68,16 @@ public sealed partial class TransactionLogMiddleware(
         {
             stopwatch.Stop();
             var responseTime = DateTime.UtcNow;
-            var responseBodyText = currentOptions.IncludeResponseBody
+            var responseBodyText = responseBody is not null
                 ? await ReadResponseBodyAsync(context, currentOptions.MaxBodyLogLength)
                 : null;
 
-            responseBody.Position = 0;
-            await responseBody.CopyToAsync(originalResponseBody, context.RequestAborted);
-            context.Response.Body = originalResponseBody;
+            if (responseBody is not null)
+            {
+                responseBody.Position = 0;
+                await responseBody.CopyToAsync(originalResponseBody, context.RequestAborted);
+                context.Response.Body = originalResponseBody;
+            }
 
             var payload = new
             {

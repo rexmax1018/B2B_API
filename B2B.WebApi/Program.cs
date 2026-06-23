@@ -2,6 +2,7 @@ using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using B2B.WebApi.Modules;
 using B2B.WebApi.Extensions;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using NLog;
 using NLog.Web;
 
@@ -62,6 +63,16 @@ try
     app.UseAuthentication();
     app.UseAuthorization();
     app.UseRateLimiter();
+
+    app.MapHealthChecks("/health/live", new HealthCheckOptions
+    {
+        Predicate = healthCheck => healthCheck.Tags.Contains("live")
+    }).AllowAnonymous();
+
+    app.MapHealthChecks("/health/ready", new HealthCheckOptions
+    {
+        Predicate = healthCheck => healthCheck.Tags.Contains("ready")
+    }).AllowAnonymous();
 
     app.MapControllers();
 

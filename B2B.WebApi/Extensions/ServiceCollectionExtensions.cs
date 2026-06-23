@@ -1,5 +1,12 @@
+using System.Net;
+using System.Text.Json;
+using B2B.Service.Options;
+using B2B.WebApi.HealthChecks;
+using B2B.WebApi.Model.Common;
 using B2B.WebApi.Options;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.OpenApi;
 using System.Threading.RateLimiting;
 
@@ -31,6 +38,14 @@ public static class ServiceCollectionExtensions
             .ValidateOnStart();
 
         services.AddMemoryCache();
+        services.AddHealthChecks()
+            .AddCheck(
+                "self",
+                () => HealthCheckResult.Healthy("OK"),
+                tags: ["live"])
+            .AddCheck<OracleHealthCheck>(
+                "oracle",
+                tags: ["ready"]);
 
         return services;
     }
@@ -44,12 +59,33 @@ public static class ServiceCollectionExtensions
     {
         services.AddRateLimiter(options =>
         {
-            options.AddFixedWindowLimiter("Auth", limiterOptions =>
+            options.OnRejected = async (context, cancellationToken) =>
             {
-                limiterOptions.PermitLimit = 5;
-                limiterOptions.Window = TimeSpan.FromMinutes(1);
-                limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-                limiterOptions.QueueLimit = 0;
+                context.HttpContext.Response.StatusCode = (int)HttpStatusCode.TooManyRequests;
+                context.HttpContext.Response.ContentType = "application/json; charset=utf-8";
+
+                var response = ApiResponse<object>.Fail(
+                    "請求過於頻繁，請稍後再試",
+                    new ErrorResponse("RATE_LIMITED", "請求過於頻繁，請稍後再試"));
+
+                await context.HttpContext.Response.WriteAsync(
+                    JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                    cancellationToken);
+            };
+
+            options.AddPolicy("Auth", httpContext =>
+            {
+                var partitionKey = BuildAuthRateLimitPartitionKey(httpContext);
+
+                return RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey,
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 5,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    });
             });
         });
 
@@ -63,7 +99,28 @@ public static class ServiceCollectionExtensions
     /// <returns>服務集合。</returns>
     public static IServiceCollection AddB2BSwagger(this IServiceCollection services)
     {
-        services.AddControllers();
+        services.AddControllers()
+            .ConfigureApiBehaviorOptions(options =>
+            {
+                options.InvalidModelStateResponseFactory = context =>
+                {
+                    var errors = context.ModelState
+                        .Where(x => x.Value?.Errors.Count > 0)
+                        .SelectMany(x => x.Value!.Errors.Select(error =>
+                            string.IsNullOrWhiteSpace(error.ErrorMessage)
+                                ? $"{x.Key} 欄位格式不正確"
+                                : error.ErrorMessage))
+                        .ToArray();
+
+                    var message = errors.Length == 0
+                        ? "請求驗證失敗"
+                        : string.Join("；", errors);
+
+                    return new BadRequestObjectResult(ApiResponse<object>.Fail(
+                        "請求驗證失敗",
+                        new ErrorResponse("VALIDATION_FAILED", message)));
+                };
+            });
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen(options =>
         {
@@ -93,5 +150,23 @@ public static class ServiceCollectionExtensions
         });
 
         return services;
+    }
+
+    /// <summary>
+    /// 建立 Auth API 分區限流鍵。
+    /// </summary>
+    /// <param name="context">HTTP 內容。</param>
+    /// <returns>限流分區鍵。</returns>
+    private static string BuildAuthRateLimitPartitionKey(HttpContext context)
+    {
+        var remoteIp = context.Connection.RemoteIpAddress?.ToString();
+        var userAgent = context.Request.Headers.UserAgent.ToString();
+        var clientKey = string.IsNullOrWhiteSpace(remoteIp)
+            ? "unknown-client"
+            : remoteIp;
+
+        return string.IsNullOrWhiteSpace(userAgent)
+            ? clientKey
+            : $"{clientKey}:{userAgent}";
     }
 }

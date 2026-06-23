@@ -31,6 +31,16 @@ public interface IRefreshTokenStore
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 以原子方式取得並移除 Refresh Token，避免同一權杖被重複換發。
+    /// </summary>
+    /// <param name="refreshToken">Refresh Token。</param>
+    /// <param name="cancellationToken">取消權杖。</param>
+    /// <returns>Refresh Token 關聯資料；找不到時為 <see langword="null"/>。</returns>
+    Task<RefreshTokenModel?> ConsumeAsync(
+        string refreshToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 移除 Refresh Token。
     /// </summary>
     /// <param name="refreshToken">Refresh Token。</param>

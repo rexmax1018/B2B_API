@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace B2B.WebApi.Options;
+namespace B2B.Service.Options;
 
 /// <summary>
 /// 表示 JWT 驗證與簽發設定。

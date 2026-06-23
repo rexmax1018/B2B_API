@@ -2,7 +2,8 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using B2B.Domain;
 using B2B.Service.Impl.Services;
-using Microsoft.Extensions.Configuration;
+using B2B.Service.Options;
+using Microsoft.Extensions.Options;
 
 namespace B2B.Tests;
 
@@ -17,17 +18,14 @@ public sealed class TokenServiceTests
     [Fact]
     public void GenerateToken_WithConfiguredJwtOptions_CreatesSignedAccessTokenAndRefreshToken()
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Jwt:Issuer"] = "B2B_API_TEST",
-                ["Jwt:Audience"] = "B2B_API_TEST_CLIENT",
-                ["Jwt:SecretKey"] = "test-secret-key-with-at-least-32-characters",
-                ["Jwt:AccessTokenMinutes"] = "30",
-                ["Jwt:RefreshTokenDays"] = "14"
-            })
-            .Build();
-        var service = new TokenService(configuration);
+        var service = new TokenService(Options.Create(new JwtOptions
+        {
+            Issuer = "B2B_API_TEST",
+            Audience = "B2B_API_TEST_CLIENT",
+            SecretKey = "test-secret-key-with-at-least-32-characters",
+            AccessTokenMinutes = 30,
+            RefreshTokenDays = 14
+        }));
         var user = new UserDomain
         {
             UserId = 99,
