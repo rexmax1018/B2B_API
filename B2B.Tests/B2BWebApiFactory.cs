@@ -16,13 +16,16 @@ public sealed class B2BWebApiFactory : WebApplicationFactory<Program>
     /// </summary>
     public B2BWebApiFactory()
     {
-        SetEnvironment("ConnectionStrings__DefaultConnection", "User Id=test;Password=test;Data Source=localhost/XEPDB1");
         SetEnvironment("Jwt__Issuer", "B2B_API_TEST");
         SetEnvironment("Jwt__Audience", "B2B_API_TEST_CLIENT");
         SetEnvironment("Jwt__SecretKey", "integration-test-secret-key-with-at-least-32-characters");
         SetEnvironment("Jwt__AccessTokenMinutes", "60");
         SetEnvironment("Jwt__RefreshTokenDays", "7");
         SetEnvironment("DataAccess__UseFakeRepositories", "true");
+        SetEnvironment("DataAccess__B2BConn__EnvType", "TEST");
+        SetEnvironment("DataAccess__B2BConn__SvrType", "DEV");
+        SetEnvironment("DataAccess__B2BConn__DBType", "INET");
+        SetEnvironment("DataAccess__B2BConn__AccType", "ASI4");
         SetEnvironment("TransactionLog__Enabled", "false");
         SetEnvironment("TransactionLog__IncludeRequestBody", "false");
         SetEnvironment("TransactionLog__IncludeResponseBody", "false");
@@ -43,13 +46,16 @@ public sealed class B2BWebApiFactory : WebApplicationFactory<Program>
         {
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ConnectionStrings:DefaultConnection"] = "User Id=test;Password=test;Data Source=localhost/XEPDB1",
                 ["Jwt:Issuer"] = "B2B_API_TEST",
                 ["Jwt:Audience"] = "B2B_API_TEST_CLIENT",
                 ["Jwt:SecretKey"] = "integration-test-secret-key-with-at-least-32-characters",
                 ["Jwt:AccessTokenMinutes"] = "60",
                 ["Jwt:RefreshTokenDays"] = "7",
                 ["DataAccess:UseFakeRepositories"] = "true",
+                ["DataAccess:B2BConn:EnvType"] = "TEST",
+                ["DataAccess:B2BConn:SvrType"] = "DEV",
+                ["DataAccess:B2BConn:DBType"] = "INET",
+                ["DataAccess:B2BConn:AccType"] = "ASI4",
                 ["TransactionLog:Enabled"] = "false",
                 ["TransactionLog:IncludeRequestBody"] = "false",
                 ["TransactionLog:IncludeResponseBody"] = "false",

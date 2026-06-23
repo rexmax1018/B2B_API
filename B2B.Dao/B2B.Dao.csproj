@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\B2B.Conn\B2B.Conn.csproj" />
     <ProjectReference Include="..\B2B.Domain\B2B.Domain.csproj" />
   </ItemGroup>
 

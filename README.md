@@ -1,109 +1,330 @@
-# B2B_API
+# B2B API
 
-.NET 10 WebAPI 多層式架構範例，包含 Oracle 19c + EF Core、JWT Access Token、MemoryCache Refresh Token、分區速率限制、全域例外處理、Health Check、Transaction Log、NLog 與 Swagger。
+B2B API 是以 ASP.NET Core Web API 為入口、Autofac Module 為模組組裝方式的分層專案。  
+目前 Oracle 連線字串不再由 `appsettings.json` 提供，而是由 `B2B.Conn` 依照環境、主機、資料庫與帳號類型解析後，再交由 `B2B.Dao` 建立資料存取設定。
 
-## 專案架構
+## 專案結構總覽
 
-```txt
-B2B_API.sln
-B2B.Dao/
-B2B.Domain/
-B2B.Service/
-B2B.Service.Impl/
-B2B.WebApi/
-B2B.WebApi.Model/
+```mermaid
+flowchart TB
+    Solution["B2B_API.sln"]
+    WebApi["B2B.WebApi<br/>HTTP API 入口與 Middleware"]
+    WebApiModel["B2B.WebApi.Model<br/>Request / Response DTO"]
+    Service["B2B.Service<br/>服務介面與 Options"]
+    ServiceImpl["B2B.Service.Impl<br/>服務實作與 Token 流程"]
+    Domain["B2B.Domain<br/>Domain Model"]
+    Dao["B2B.Dao<br/>Repository / EF Core / Oracle"]
+    Conn["B2B.Conn<br/>連線資訊解析與解密"]
+    Tests["B2B.Tests<br/>整合與單元測試"]
+
+    Solution --> WebApi
+    Solution --> WebApiModel
+    Solution --> Service
+    Solution --> ServiceImpl
+    Solution --> Domain
+    Solution --> Dao
+    Solution --> Conn
+    Solution --> Tests
 ```
 
-## 子專案職責
-
-- `B2B.Domain`：Service 與 Dao 之間共用的 Domain Model。
-- `B2B.Dao`：EF Core DbContext、Oracle Entity Mapping、Repository。
-- `B2B.Service`：Service interface。
-- `B2B.Service.Impl`：JWT Access Token、MemoryCache Refresh Token、登入流程與使用者服務實作。
-- `B2B.WebApi.Model`：對外 Request / Response DTO 與統一 API 回應格式。
-- `B2B.WebApi`：Controller、Middleware、DI、Swagger、NLog、設定檔與 API 入口。
-
-## 還原與建置
-
-```powershell
-dotnet restore B2B_API.sln
-dotnet build B2B_API.sln
+```text
+B2B_API
+├─ B2B.WebApi              API Host、Controller、Middleware、Swagger、驗證與安全設定
+├─ B2B.WebApi.Model        API 請求與回應模型
+├─ B2B.Service             Service 介面、Options 與跨層抽象
+├─ B2B.Service.Impl        Auth / User / Token Service 實作
+├─ B2B.Domain              Domain Model 與領域資料結構
+├─ B2B.Dao                 DbContext、Repository、DAO Module
+├─ B2B.Conn                AWS 離線環境連線資訊解析、INI 讀取、解密
+├─ B2B.Tests               測試專案
+└─ resources/B2B_Conn      B2B.Conn 還原參考截圖
 ```
 
-## 執行 WebApi
+## 專案職責
 
-```powershell
-dotnet run --project B2B.WebApi/B2B.WebApi.csproj
+| 專案 | 職責 | 主要輸出 |
+| --- | --- | --- |
+| `B2B.WebApi` | API 啟動、Controller、Middleware、Swagger、認證授權、Rate Limit、Health Check | HTTP API |
+| `B2B.WebApi.Model` | API DTO 與共用回應格式 | `ApiResponse<T>`、Login/Refresh Request |
+| `B2B.Service` | Service 介面與 Options | `IAuthService`、`ITokenService`、`JwtOptions` |
+| `B2B.Service.Impl` | 商業流程實作 | Login、Refresh Token、Logout、JWT 產生 |
+| `B2B.Domain` | Domain Model | User、Token、Login Result |
+| `B2B.Dao` | 資料存取 | `B2BDbContext`、`IUserRepository`、Oracle Repository |
+| `B2B.Conn` | 連線帳密解析 | `B2B_Conn.GetEntityInfo(...)` |
+| `B2B.Tests` | 測試與 WebApi Factory | 測試用 Host 與設定覆寫 |
+
+## 專案相依關係
+
+```mermaid
+flowchart LR
+    WebApi["B2B.WebApi"]
+    WebApiModel["B2B.WebApi.Model"]
+    Service["B2B.Service"]
+    ServiceImpl["B2B.Service.Impl"]
+    Domain["B2B.Domain"]
+    Dao["B2B.Dao"]
+    Conn["B2B.Conn"]
+    Tests["B2B.Tests"]
+
+    WebApi --> WebApiModel
+    WebApi --> Service
+    WebApi --> ServiceImpl
+    WebApi --> Dao
+    WebApi --> Domain
+
+    ServiceImpl --> Service
+    ServiceImpl --> Domain
+    ServiceImpl --> Dao
+
+    Dao --> Domain
+    Dao --> Conn
+
+    Tests --> WebApi
+    Tests --> WebApiModel
+    Tests --> Service
+    Tests --> ServiceImpl
+    Tests --> Dao
+    Tests --> Domain
 ```
 
-啟動後可開啟 Swagger：
+相依方向原則：
 
-```txt
-https://localhost:<port>/swagger
+- `B2B.WebApi` 是 Composition Root，負責組裝所有 Module。
+- `B2B.Service` 只定義介面與 Options，不依賴實作層。
+- `B2B.Service.Impl` 依賴 `B2B.Dao` 取得資料。
+- `B2B.Dao` 依賴 `B2B.Conn` 取得 Oracle 連線資訊。
+- `B2B.Conn` 不需要被其他專案直接呼叫，外部主要透過 `B2B.Dao` 間接使用。
+
+## NuGet 相依關係
+
+```mermaid
+flowchart TB
+    WebApi["B2B.WebApi"]
+    ServiceImpl["B2B.Service.Impl"]
+    Dao["B2B.Dao"]
+    Conn["B2B.Conn"]
+    Tests["B2B.Tests"]
+
+    Autofac["Autofac / Autofac.Extensions.DependencyInjection"]
+    JwtBearer["Microsoft.AspNetCore.Authentication.JwtBearer"]
+    Swagger["Microsoft.AspNetCore.OpenApi / Swashbuckle.AspNetCore"]
+    NLog["NLog.Web.AspNetCore"]
+    EF["Microsoft.EntityFrameworkCore"]
+    OracleEF["Oracle.EntityFrameworkCore"]
+    MemoryCache["Microsoft.Extensions.Caching.Memory"]
+    JwtToken["System.IdentityModel.Tokens.Jwt"]
+    Testing["xUnit / Microsoft.AspNetCore.Mvc.Testing / coverlet"]
+
+    WebApi --> Autofac
+    WebApi --> JwtBearer
+    WebApi --> Swagger
+    WebApi --> NLog
+    WebApi --> OracleEF
+    WebApi --> EF
+
+    ServiceImpl --> Autofac
+    ServiceImpl --> MemoryCache
+    ServiceImpl --> JwtToken
+
+    Dao --> Autofac
+    Dao --> EF
+    Dao --> OracleEF
+
+    Conn --> Autofac
+    Tests --> Testing
 ```
 
-## Oracle Connection String
+主要套件用途：
 
-設定 key：`ConnectionStrings:DefaultConnection`
+- Autofac：以 Module 管理跨專案 DI 註冊。
+- EF Core / Oracle.EntityFrameworkCore：建立 Oracle DbContext 與 Repository。
+- JwtBearer / System.IdentityModel.Tokens.Jwt：處理 JWT 驗證與 Token 產生。
+- NLog.Web.AspNetCore：應用程式與交易紀錄輸出。
+- Swashbuckle.AspNetCore：Development 環境 Swagger 文件。
+- xUnit / Mvc.Testing：測試 WebApi Host 與 API 行為。
 
-請透過 Secret Manager、環境變數或正式機密管理服務注入，不要將含密碼的 connection string commit 到 repository。
+## Autofac Module 組裝流程
 
-```powershell
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "<oracle-connection-string>" --project B2B.WebApi/B2B.WebApi.csproj
+```mermaid
+flowchart TB
+    Program["Program.cs<br/>UseServiceProviderFactory Autofac"]
+    WebApiModule["B2BWebApiModule"]
+    DaoModule["B2BDaoModule"]
+    ServiceModule["B2BServiceModule"]
+    ConnModule["B2BConnModule"]
+
+    Program --> WebApiModule
+    WebApiModule --> DaoModule
+    WebApiModule --> ServiceModule
+    DaoModule --> ConnModule
+
+    ConnModule --> ConnServices["B2B.Conn Services<br/>Profile / INI / Crypto / Facade"]
+    DaoModule --> DaoServices["DAO Services<br/>DbContext / Repository / Dao Options"]
+    ServiceModule --> AppServices["Application Services<br/>Auth / User / Token / RefreshTokenStore"]
 ```
 
-正式接 Oracle 時請設定：
+`B2B.WebApi` 啟動時只註冊 `B2BWebApiModule`，再由此 Module 統一引入：
+
+- `B2BDaoModule`：資料存取與 Oracle 連線設定。
+- `B2BServiceModule`：應用服務、Token 與 Refresh Token Store。
+- `B2BConnModule`：由 `B2BDaoModule` 引入，用於解析 Oracle 帳密與連線端點。
+
+### Module 使用方式
+
+```mermaid
+flowchart TD
+    Program["Program.cs"]
+    RegisterRoot["RegisterModule<B2BWebApiModule>"]
+    WebApiModule["B2BWebApiModule.Load"]
+    RegisterDao["RegisterModule<B2BDaoModule>"]
+    RegisterService["RegisterModule<B2BServiceModule>"]
+    DaoModule["B2BDaoModule.Load"]
+    RegisterConn["RegisterModule<B2BConnModule>"]
+
+    Program --> RegisterRoot --> WebApiModule
+    WebApiModule --> RegisterDao --> DaoModule --> RegisterConn
+    WebApiModule --> RegisterService
+```
+
+`Program.cs` 只需要註冊 WebApi 根模組：
+
+```csharp
+builder.Host.UseServiceProviderFactory(new AutofacServiceProviderFactory());
+builder.Host.ConfigureContainer<ContainerBuilder>(containerBuilder =>
+    containerBuilder.RegisterModule<B2BWebApiModule>());
+```
+
+其他專案不需要在 `Program.cs` 個別註冊實作類別，由各自 Module 負責維護。
+
+## 啟動流程
+
+```mermaid
+flowchart TD
+    Start["dotnet run --project B2B.WebApi"]
+    Builder["建立 WebApplicationBuilder"]
+    Autofac["切換 DI Container 為 Autofac<br/>註冊 B2BWebApiModule"]
+    Config["讀取 appsettings 與環境設定"]
+    Options["AddB2BOptions"]
+    Auth["AddB2BAuthentication"]
+    RateLimit["AddB2BRateLimiting"]
+    Swagger["AddB2BSwagger"]
+    Build["Build WebApplication"]
+    Validate["SecurityConfigurationValidator.Validate"]
+    Pipeline["建立 Middleware Pipeline"]
+    Run["app.Run"]
+
+    Start --> Builder --> Autofac --> Config
+    Config --> Options --> Auth --> RateLimit --> Swagger --> Build --> Validate --> Pipeline --> Run
+```
+
+啟動時會在 `builder.Build()` 後執行安全設定檢查。非 Development 環境中特別會阻擋下列設定：
+
+- `DataAccess:UseFakeRepositories = true`
+- `TransactionLog:IncludeRequestBody = true`
+- `TransactionLog:IncludeResponseBody = true`
+- `AllowedHosts` 為空白或 `*`
+- JWT SecretKey 為空白、預設值或不安全佔位值
+
+## HTTP Pipeline
+
+```mermaid
+flowchart TD
+    Request["HTTP Request"]
+    SecurityHeaders["UseB2BSecurityHeaders"]
+    ExceptionHandling["UseB2BExceptionHandling"]
+    TransactionLog["UseB2BTransactionLog"]
+    Swagger["Swagger<br/>Development only"]
+    Https["UseHttpsRedirection"]
+    Authentication["UseAuthentication"]
+    Authorization["UseAuthorization"]
+    RateLimiter["UseRateLimiter"]
+    Health["MapHealthChecks<br/>/health/live<br/>/health/ready"]
+    Controllers["MapControllers"]
+    Response["HTTP Response"]
+
+    Request --> SecurityHeaders --> ExceptionHandling --> TransactionLog
+    TransactionLog --> Swagger --> Https --> Authentication --> Authorization --> RateLimiter
+    RateLimiter --> Health
+    RateLimiter --> Controllers
+    Health --> Response
+    Controllers --> Response
+```
+
+Middleware 重點：
+
+- Security Headers：加入基本安全回應標頭。
+- Exception Handling：集中處理未捕捉例外，回傳一致的 API 錯誤格式。
+- Transaction Log：記錄請求、回應、TraceId、耗時、Client IP、User-Agent。
+- HTTPS Redirection：將 HTTP 導向 HTTPS。
+- Authentication / Authorization：使用 JWT Bearer Token。
+- Rate Limiter：限制登入等敏感 API 的請求頻率。
+- Health Checks：提供 liveness 與 readiness 檢查。
+
+## 設定結構
+
+```mermaid
+flowchart TB
+    AppSettings["appsettings.json"]
+    Jwt["Jwt"]
+    DataAccess["DataAccess"]
+    B2BConn["DataAccess:B2BConn"]
+    TransactionLog["TransactionLog"]
+    RefreshTokenStore["RefreshTokenStore"]
+    AllowedHosts["AllowedHosts"]
+
+    AppSettings --> Jwt
+    AppSettings --> DataAccess
+    DataAccess --> B2BConn
+    AppSettings --> TransactionLog
+    AppSettings --> RefreshTokenStore
+    AppSettings --> AllowedHosts
+
+    B2BConn --> EnvType["EnvType"]
+    B2BConn --> SvrType["SvrType"]
+    B2BConn --> DBType["DBType"]
+    B2BConn --> AccType["AccType"]
+```
+
+目前 `appsettings.json` 不再需要 `ConnectionStrings`。  
+Oracle 連線一律透過下列設定交由 `B2B.Conn` 解析：
 
 ```json
 {
   "DataAccess": {
-    "UseFakeRepositories": false
+    "UseFakeRepositories": false,
+    "B2BConn": {
+      "EnvType": "DEV",
+      "SvrType": "API",
+      "DBType": "B2B",
+      "AccType": "APP"
+    }
   }
 }
 ```
 
-非 Development 環境若啟用 `DataAccess:UseFakeRepositories`，應用程式會在啟動時中止。
-
-## JWT 設定
-
-Access Token 使用 JWT，採 stateless 設計，不儲存在資料庫。`Jwt:Issuer`、`Jwt:Audience`、token 期限可放在一般設定檔；`Jwt:SecretKey` 必須透過安全設定來源注入。
-
-```powershell
-dotnet user-secrets set "Jwt:SecretKey" "<strong-random-secret>" --project B2B.WebApi/B2B.WebApi.csproj
-```
-
-若 `Jwt:SecretKey` 為空白或仍為 placeholder，應用程式會在啟動時中止。
-
-## Refresh Token Store
-
-Refresh Token 使用 `IMemoryCache` 儲存，不寫入 Oracle，也不需要 Refresh Token 資料表或 Repository。Cache key 會使用 Refresh Token 的 SHA256 hash 組成，不直接使用明文 token。換發 Refresh Token 時會以原子方式 consume 舊 token，避免同一個 Refresh Token 在併發請求下被重複換發。
+### Jwt
 
 ```json
 {
-  "RefreshTokenStore": {
-    "Provider": "Memory"
+  "Jwt": {
+    "Issuer": "B2B.WebApi",
+    "Audience": "B2B.Client",
+    "SecretKey": "請填入至少 32 字元的安全密鑰",
+    "AccessTokenMinutes": 60,
+    "RefreshTokenDays": 7
   }
 }
 ```
 
-WebAPI 重啟後 MemoryCache 會清空，原本核發的 Refresh Token 會失效，使用者需要重新登入。目前規劃為單一 API 機器，因此持續使用 MemoryCache；若未來改為多台 WebAPI，應改用 Redis / Distributed Cache 或資料庫儲存 Refresh Token，確保多節點之間狀態一致。
+| 欄位 | 說明 |
+| --- | --- |
+| `Issuer` | JWT 簽發者 |
+| `Audience` | JWT 使用對象 |
+| `SecretKey` | HMAC 簽章密鑰，至少 32 字元 |
+| `AccessTokenMinutes` | Access Token 有效分鐘數 |
+| `RefreshTokenDays` | Refresh Token 有效天數 |
 
-## Auth Rate Limit
-
-Auth Controller 套用 `Auth` rate limit policy，依用戶端 IP 與 User-Agent 建立分區，每個分區每分鐘允許 5 次請求，超過時回傳標準 `ApiResponse`：
-
-```json
-{
-  "success": false,
-  "message": "請求過於頻繁，請稍後再試",
-  "error": {
-    "code": "RATE_LIMITED",
-    "message": "請求過於頻繁，請稍後再試"
-  }
-}
-```
-
-## Transaction Log
+### TransactionLog
 
 ```json
 {
@@ -117,80 +338,348 @@ Auth Controller 套用 `Auth` rate limit policy，依用戶端 IP 與 User-Agent
 }
 ```
 
-Middleware 會記錄 TraceId、HTTP method、path、query string、status code、client IP、UserAgent、耗時與時間戳。request/response body 預設不記錄；非 Development 環境若開啟 body logging，應用程式會在啟動時中止。敏感欄位如 `password`、`accessToken`、`refreshToken`、`token`、`authorization` 會遮罩。client IP 預設使用連線來源；只有在明確設定 `TrustForwardedHeaders` 時才會讀取 `X-Forwarded-For` / `X-Real-IP`。
+| 欄位 | 說明 |
+| --- | --- |
+| `Enabled` | 是否啟用交易紀錄 |
+| `IncludeRequestBody` | 是否記錄 Request Body，正式環境不建議啟用 |
+| `IncludeResponseBody` | 是否記錄 Response Body，正式環境不建議啟用 |
+| `TrustForwardedHeaders` | 是否信任反向代理傳入的 Forwarded Headers |
+| `MaxBodyLogLength` | Body 最大記錄長度 |
 
-## NLog Log 位置
+### RefreshTokenStore
 
-```txt
-B2B.WebApi/logs/
-  app/app.log
-  error/error.log
-  transaction/transaction.log
-```
-
-一般 app/error log 單檔上限為 10 MB，依天輪替並保留最多 7 天。Transaction log 單檔上限為 10 MB，依小時輪替並保留最多 7 天。
-
-## API 測試範例
-
-Health：
-
-```http
-GET /Health
-```
-
-Liveness：
-
-```http
-GET /health/live
-```
-
-Readiness：
-
-```http
-GET /health/ready
-```
-
-`/health/ready` 會檢查 Oracle 連線，適合部署平台判斷服務是否已可承接流量。
-
-Login：
-
-```http
-POST /api/auth/login
-Content-Type: application/json
-
+```json
 {
-  "account": "admin",
-  "password": "<password>"
+  "RefreshTokenStore": {
+    "Provider": "Memory"
+  }
 }
 ```
 
-Refresh Token：
+目前 Refresh Token Store 實作為記憶體版本，程式啟動後 Token 狀態保存在目前行程內。重啟服務後，既有 Refresh Token 狀態會消失。
 
-```http
-POST /api/auth/refresh-token
-Content-Type: application/json
+## B2B.Conn 連線解析流程
 
-{
-  "refreshToken": "<login response refreshToken>"
-}
+```mermaid
+flowchart TD
+    DaoOptions["B2BDaoModule 建立 B2BDaoOptions"]
+    Config["讀取 DataAccess:B2BConn"]
+    Facade["B2B_Conn.GetEntityInfo<br/>EnvType / SvrType / DBType / AccType"]
+    Resolver["CredentialResolutionService"]
+    Profile["ConnectionProfileProvider<br/>比對連線設定檔"]
+    Month["MonthCredentialSelector<br/>依月份選擇 1 或 2"]
+    Ini["IniCredentialStore<br/>讀取 B2BConn1.ini 或 B2BConn2.ini"]
+    Keys["KeySetProvider<br/>讀取 C:\\B2B_Conn\\Other"]
+    Crypto["AesStringProtector<br/>解密 INI 內容"]
+    Parser["CredentialTextParser<br/>解析帳號與密碼"]
+    Formatter["PasswordFormatter<br/>組合月份密碼格式"]
+    Entity["Entity_Connection<br/>Host / Port / ServiceName / Account / Password"]
+    Oracle["Oracle ConnectionString"]
+
+    DaoOptions --> Config --> Facade --> Resolver --> Profile --> Month --> Ini
+    Ini --> Crypto
+    Keys --> Crypto
+    Crypto --> Parser --> Formatter --> Entity --> Oracle
 ```
 
-Logout：
+`B2B.Conn` 保留外部呼叫介面，主要入口為：
 
-```http
-POST /api/auth/logout
-Content-Type: application/json
-
-{
-  "refreshToken": "<login response refreshToken>"
-}
+```csharp
+var entity = B2B_Conn.B2B_Conn.GetEntityInfo(envType, svrType, dbType, accType);
 ```
 
-## 正式環境建議
+回傳結果會包含資料庫連線所需資訊，`B2B.Dao` 再將它轉為 EF Core Oracle 使用的格式：
 
-- 將 `DataAccess:UseFakeRepositories` 改為 `false` 並建立正式 Oracle schema。
-- 使用 PBKDF2、BCrypt 或 Argon2 儲存密碼雜湊，不保存明文密碼。
-- 將 `Jwt:SecretKey` 移至安全機密管理。
-- 單機部署可持續使用 MemoryCache Refresh Token Store；多台 WebAPI 部署時，將 Refresh Token Store 從 MemoryCache 改為 Redis / Distributed Cache 或資料庫。
-- 依環境調整 NLog 保留天數、封存策略與集中式 log 收集。
-- 規劃 EF Core migration 或 DBA-controlled DDL 流程。
+```text
+User Id={Account};
+Password={Password};
+Data Source={Host}:{Port}/{ServiceName};
+Pooling=true;
+Max Pool Size=100
+```
+
+### B2B.Conn 外部檔案需求
+
+```mermaid
+flowchart TB
+    Root["C:\\B2B_Conn"]
+    Ini1["B2BConn1.ini"]
+    Ini2["B2BConn2.ini"]
+    Other["Other"]
+    Keys["解密 Key / IV 等必要檔案"]
+
+    Root --> Ini1
+    Root --> Ini2
+    Root --> Other --> Keys
+```
+
+`B2B.Conn` 還原自 AWS 離線環境截圖，因此實際帳密、INI 與金鑰檔不會提交到 Git。部署或本機執行時，必須由環境提供 `C:\B2B_Conn` 相關檔案。
+
+## DAO 運作流程
+
+```mermaid
+flowchart TD
+    RequestRepo["Service 呼叫 IUserRepository"]
+    RepoSwitch["B2BDaoModule 判斷<br/>UseFakeRepositories"]
+    Fake["InMemoryUserRepository"]
+    OracleRepo["OracleUserRepository"]
+    DbContext["B2BDbContext"]
+    ConnInfo["B2B.Conn 提供連線資訊"]
+    OracleDb["Oracle Database"]
+
+    RequestRepo --> RepoSwitch
+    RepoSwitch -->|true| Fake
+    RepoSwitch -->|false| OracleRepo
+    OracleRepo --> DbContext
+    ConnInfo --> DbContext
+    DbContext --> OracleDb
+```
+
+`DataAccess:UseFakeRepositories` 可切換資料來源：
+
+- `true`：使用記憶體 Repository，適合開發或測試。
+- `false`：使用 Oracle Repository，連線資訊由 `B2B.Conn` 提供。
+
+正式環境不可啟用 Fake Repository，啟動檢查會阻擋此設定。
+
+## 登入流程
+
+```mermaid
+sequenceDiagram
+    participant Client as Client
+    participant Controller as AuthController
+    participant Auth as AuthService
+    participant Repo as IUserRepository
+    participant Token as TokenService
+    participant Store as IRefreshTokenStore
+
+    Client->>Controller: POST /api/auth/login
+    Controller->>Auth: LoginAsync(request)
+    Auth->>Repo: 依帳號查詢使用者
+    Repo-->>Auth: UserDomain
+    Auth->>Auth: 驗證密碼與帳號狀態
+    Auth->>Token: 建立 Access Token 與 Refresh Token
+    Token-->>Auth: LoginResultDomain
+    Auth->>Store: 儲存 Refresh Token
+    Auth-->>Controller: 登入結果
+    Controller-->>Client: ApiResponse LoginResponse
+```
+
+登入成功後會回傳：
+
+- Access Token：用於後續 API 的 Bearer Token。
+- Refresh Token：用於 Access Token 過期後換發新 Token。
+- 使用者基本資訊與 Token 到期時間。
+
+## Refresh Token 流程
+
+```mermaid
+sequenceDiagram
+    participant Client as Client
+    participant Controller as AuthController
+    participant Auth as AuthService
+    participant Store as IRefreshTokenStore
+    participant Repo as IUserRepository
+    participant Token as TokenService
+
+    Client->>Controller: POST /api/auth/refresh-token
+    Controller->>Auth: RefreshTokenAsync(request)
+    Auth->>Store: 驗證並消耗舊 Refresh Token
+    Store-->>Auth: Token 記錄
+    Auth->>Repo: 重新取得使用者資訊
+    Repo-->>Auth: UserDomain
+    Auth->>Token: 產生新 Access Token 與 Refresh Token
+    Auth->>Store: 儲存新 Refresh Token
+    Auth-->>Controller: 新 Token 結果
+    Controller-->>Client: ApiResponse LoginResponse
+```
+
+Refresh Token 採用輪替機制。舊 Token 使用後會失效，並由服務產生新的 Token 組合。
+
+## 登出流程
+
+```mermaid
+sequenceDiagram
+    participant Client as Client
+    participant Controller as AuthController
+    participant Auth as AuthService
+    participant Store as IRefreshTokenStore
+
+    Client->>Controller: POST /api/auth/logout
+    Controller->>Auth: LogoutAsync(request)
+    Auth->>Store: 撤銷 Refresh Token
+    Store-->>Auth: 撤銷結果
+    Auth-->>Controller: 登出結果
+    Controller-->>Client: ApiResponse
+```
+
+登出會使指定 Refresh Token 失效。Access Token 因為是 JWT，仍會在原本效期內自然過期；需要立即封鎖時，需再加入 Token 黑名單或版本號檢查機制。
+
+## 例外與交易紀錄流程
+
+```mermaid
+flowchart TD
+    Request["Request"]
+    TransactionStart["TransactionLogMiddleware<br/>建立 TraceId 與開始時間"]
+    SensitiveMask["敏感欄位遮罩"]
+    Next["呼叫下一個 Middleware / Controller"]
+    Exception["ExceptionHandlingMiddleware<br/>捕捉未處理例外"]
+    Log["ILogger / TransactionLogger"]
+    Response["一致 API Response"]
+
+    Request --> TransactionStart --> SensitiveMask --> Next
+    Next -->|成功| Log --> Response
+    Next -->|例外| Exception --> Log --> Response
+```
+
+交易紀錄會記錄：
+
+- TraceId
+- HTTP Method、Path、QueryString
+- Status Code
+- Client IP、User-Agent
+- Request / Response 時間
+- Elapsed Milliseconds
+- 選擇性 Request Body / Response Body
+
+敏感資料會在寫入紀錄前遮罩，避免密碼、Token 等資訊直接出現在 Log 中。
+
+## Health Check 流程
+
+```mermaid
+flowchart LR
+    Live["GET /health/live"]
+    Ready["GET /health/ready"]
+    Self["self check"]
+    OracleCheck["OracleHealthCheck"]
+    DbContext["B2BDbContext.Database.CanConnectAsync"]
+    Oracle["Oracle Database"]
+
+    Live --> Self
+    Ready --> OracleCheck --> DbContext --> Oracle
+```
+
+| Endpoint | 用途 | 檢查內容 |
+| --- | --- | --- |
+| `/health/live` | Liveness | API 行程是否存活 |
+| `/health/ready` | Readiness | API 是否可連線至 Oracle |
+
+## API 回應格式
+
+```mermaid
+flowchart TB
+    ApiResponse["ApiResponse of T"]
+    Success["Success"]
+    Data["Data"]
+    Error["Error"]
+    TraceId["TraceId"]
+
+    ApiResponse --> Success
+    ApiResponse --> Data
+    ApiResponse --> Error
+    ApiResponse --> TraceId
+```
+
+API 回應會透過共用格式包裝，成功與失敗皆會保留一致結構，方便前端或呼叫端統一處理。
+
+## Rate Limit 流程
+
+```mermaid
+flowchart TD
+    Request["受限制 API Request"]
+    Key["依 Client IP + User-Agent 建立 Partition Key"]
+    Window["Fixed Window<br/>每分鐘限制次數"]
+    Pass["允許通過"]
+    Reject["回傳 429<br/>ApiResponse RATE_LIMITED"]
+
+    Request --> Key --> Window
+    Window -->|未超過| Pass
+    Window -->|超過| Reject
+```
+
+目前登入等敏感 API 可套用 Rate Limit，避免短時間大量嘗試。
+
+## 本機執行
+
+### 還原套件
+
+```powershell
+dotnet restore
+```
+
+### 建置
+
+```powershell
+dotnet build
+```
+
+### 啟動 Web API
+
+```powershell
+dotnet run --project B2B.WebApi
+```
+
+若要讓 `dotnet run` 同時啟動 HTTPS，請確認 `B2B.WebApi/Properties/launchSettings.json` 的 `applicationUrl` 包含 `https://...`，並且本機已信任 ASP.NET Core 開發憑證：
+
+```powershell
+dotnet dev-certs https --trust
+```
+
+## 測試
+
+```powershell
+dotnet test
+```
+
+測試專案會使用 `B2BWebApiFactory` 覆寫部分設定，避免測試環境依賴正式環境的 Oracle 連線資訊。
+
+## 部署注意事項
+
+```mermaid
+flowchart TD
+    Deploy["部署前檢查"]
+    Jwt["設定安全 Jwt SecretKey"]
+    Hosts["設定明確 AllowedHosts"]
+    Fake["關閉 UseFakeRepositories"]
+    BodyLog["關閉 Request / Response Body Log"]
+    ConnFiles["提供 C:\\B2B_Conn 檔案"]
+    Https["確認 HTTPS 與憑證"]
+    Health["確認 /health/ready 通過"]
+
+    Deploy --> Jwt --> Hosts --> Fake --> BodyLog --> ConnFiles --> Https --> Health
+```
+
+正式環境至少應確認：
+
+- `Jwt:SecretKey` 已改為安全密鑰。
+- `AllowedHosts` 不可為 `*`。
+- `DataAccess:UseFakeRepositories` 必須為 `false`。
+- `TransactionLog:IncludeRequestBody` 與 `IncludeResponseBody` 必須為 `false`。
+- `C:\B2B_Conn` 下的 INI 與金鑰檔案已由環境提供。
+- `/health/ready` 可以正常連線 Oracle。
+
+## 設計重點
+
+```mermaid
+flowchart TB
+    Modular["模組化"]
+    Config["設定集中"]
+    Security["正式環境安全檢查"]
+    Conn["連線資訊由 B2B.Conn 提供"]
+    Api["一致 API 回應格式"]
+    Logs["交易紀錄與 TraceId"]
+
+    Modular --> Config
+    Config --> Conn
+    Config --> Security
+    Security --> Api
+    Api --> Logs
+```
+
+整體設計目標：
+
+- 使用 Autofac Module 降低註冊邏輯散落。
+- 使用 `B2B.Conn` 集中處理 AWS 離線環境的連線帳密解析。
+- 讓 `appsettings.json` 不保存 Oracle 連線字串。
+- 讓 WebApi 啟動時即檢查正式環境高風險設定。
+- 讓 API 回應、例外處理、交易紀錄與健康檢查保持一致。
