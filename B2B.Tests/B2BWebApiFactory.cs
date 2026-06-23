@@ -31,6 +31,9 @@ public sealed class B2BWebApiFactory : WebApplicationFactory<Program>
         SetEnvironment("TransactionLog__IncludeResponseBody", "false");
         SetEnvironment("TransactionLog__TrustForwardedHeaders", "false");
         SetEnvironment("TransactionLog__MaxBodyLogLength", "10000");
+        SetEnvironment("RateLimiting__Auth__PermitLimit", "5");
+        SetEnvironment("RateLimiting__Auth__WindowSeconds", "60");
+        SetEnvironment("RateLimiting__Auth__QueueLimit", "0");
         SetEnvironment("AllowedHosts", "localhost");
     }
 
@@ -61,6 +64,9 @@ public sealed class B2BWebApiFactory : WebApplicationFactory<Program>
                 ["TransactionLog:IncludeResponseBody"] = "false",
                 ["TransactionLog:TrustForwardedHeaders"] = "false",
                 ["TransactionLog:MaxBodyLogLength"] = "10000",
+                ["RateLimiting:Auth:PermitLimit"] = "5",
+                ["RateLimiting:Auth:WindowSeconds"] = "60",
+                ["RateLimiting:Auth:QueueLimit"] = "0",
                 ["AllowedHosts"] = "localhost"
             });
         });

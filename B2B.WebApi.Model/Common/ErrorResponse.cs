@@ -16,6 +16,16 @@ public sealed class ErrorResponse
     public string Message { get; set; } = string.Empty;
 
     /// <summary>
+    /// 取得或設定補充錯誤內容。
+    /// </summary>
+    public string? Details { get; set; }
+
+    /// <summary>
+    /// 取得或設定欄位驗證錯誤。
+    /// </summary>
+    public IDictionary<string, string[]>? ValidationErrors { get; set; }
+
+    /// <summary>
     /// 初始化錯誤回應。
     /// </summary>
     public ErrorResponse()

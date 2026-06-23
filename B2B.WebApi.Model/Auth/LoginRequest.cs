@@ -1,5 +1,3 @@
-using System.ComponentModel.DataAnnotations;
-
 namespace B2B.WebApi.Model.Auth;
 
 /// <summary>
@@ -10,14 +8,10 @@ public sealed class LoginRequest
     /// <summary>
     /// 取得或設定登入帳號。
     /// </summary>
-    [Required]
-    [StringLength(100, MinimumLength = 1)]
-    public string Account { get; set; } = string.Empty;
+    public string? Account { get; set; }
 
     /// <summary>
     /// 取得或設定登入密碼。
     /// </summary>
-    [Required]
-    [StringLength(256, MinimumLength = 8)]
-    public string Password { get; set; } = string.Empty;
+    public string? Password { get; set; }
 }

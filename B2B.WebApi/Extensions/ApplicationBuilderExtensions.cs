@@ -1,4 +1,6 @@
 using B2B.WebApi.Middlewares;
+using B2B.WebApi.Options;
+using Microsoft.Extensions.Options;
 
 namespace B2B.WebApi.Extensions;
 
@@ -7,6 +9,22 @@ namespace B2B.WebApi.Extensions;
 /// </summary>
 public static class ApplicationBuilderExtensions
 {
+    /// <summary>
+    /// 依設定加入 Forwarded Headers middleware。
+    /// </summary>
+    /// <param name="app">應用程式管線。</param>
+    /// <returns>應用程式管線。</returns>
+    public static IApplicationBuilder UseB2BForwardedHeaders(this IApplicationBuilder app)
+    {
+        var options = app.ApplicationServices
+            .GetRequiredService<IOptions<B2BForwardedHeadersOptions>>()
+            .Value;
+
+        return options.Enabled
+            ? app.UseForwardedHeaders()
+            : app;
+    }
+
     /// <summary>
     /// 加入安全性 HTTP 標頭。
     /// </summary>

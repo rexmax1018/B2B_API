@@ -27,16 +27,22 @@ public sealed class ApiResponse<T>
     public ErrorResponse? Error { get; set; }
 
     /// <summary>
+    /// 取得或設定本次請求的追蹤編號。
+    /// </summary>
+    public string? TraceId { get; set; }
+
+    /// <summary>
     /// 建立成功回應。
     /// </summary>
     /// <param name="data">回應資料。</param>
     /// <param name="message">回應訊息。</param>
     /// <returns>成功回應。</returns>
-    public static ApiResponse<T> Ok(T data, string? message = null) => new()
+    public static ApiResponse<T> Ok(T data, string? message = null, string? traceId = null) => new()
     {
         Success = true,
         Data = data,
-        Message = message
+        Message = message,
+        TraceId = traceId
     };
 
     /// <summary>
@@ -45,10 +51,11 @@ public sealed class ApiResponse<T>
     /// <param name="message">失敗訊息。</param>
     /// <param name="error">錯誤內容。</param>
     /// <returns>失敗回應。</returns>
-    public static ApiResponse<T> Fail(string message, ErrorResponse error) => new()
+    public static ApiResponse<T> Fail(string message, ErrorResponse error, string? traceId = null) => new()
     {
         Success = false,
         Message = message,
-        Error = error
+        Error = error,
+        TraceId = traceId
     };
 }

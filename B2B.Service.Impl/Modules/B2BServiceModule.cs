@@ -30,6 +30,6 @@ public sealed class B2BServiceModule : Autofac.Module
 
         builder.RegisterType<MemoryRefreshTokenStore>()
             .As<IRefreshTokenStore>()
-            .InstancePerLifetimeScope();
+            .SingleInstance();
     }
 }

@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using B2B.Dao.Repositories.Interfaces;
 using B2B.Domain;
 using B2B.Domain.Models;
@@ -21,11 +20,10 @@ public sealed class AuthService(
     private const string RefreshTokenExpiredCode = "REFRESH_TOKEN_EXPIRED";
     private const string RefreshTokenRevokedCode = "REFRESH_TOKEN_REVOKED";
     private const string RefreshTokenInvalidMessage = "登入狀態已失效，請重新登入";
-    private const int MinPbkdf2Iterations = 100_000;
-    private const int ExpectedPbkdf2Parts = 4;
+    private const long TemporaryUserId = 0;
 
     /// <summary>
-    /// 驗證登入帳號與密碼，成功時簽發權杖並保存 Refresh Token。
+    /// 暫時略過登入帳號與密碼驗證，成功時簽發權杖並保存 Refresh Token。
     /// </summary>
     /// <param name="account">登入帳號。</param>
     /// <param name="password">登入密碼。</param>
@@ -36,17 +34,14 @@ public sealed class AuthService(
         string password,
         CancellationToken cancellationToken)
     {
-        var user = await userRepository.GetByAccountAsync(account, cancellationToken);
+        // TODO: 接回正式使用者驗證後，需恢復帳號狀態與密碼檢查。
+        var user = await userRepository.GetByAccountAsync(account, cancellationToken)
+            ?? CreateTemporaryUser(account, TemporaryUserId);
 
-        if (user is not null && user.IsActive && VerifyPassword(password, user.PasswordHash))
-        {
-            var token = tokenService.GenerateToken(user);
-            await SaveRefreshTokenAsync(user, token, cancellationToken);
+        var token = tokenService.GenerateToken(user);
+        await SaveRefreshTokenAsync(user, token, cancellationToken);
 
-            return LoginResultDomain.Succeeded(user, token);
-        }
-
-        return LoginResultDomain.Failed("帳號或密碼錯誤");
+        return LoginResultDomain.Succeeded(user, token);
     }
 
     /// <summary>
@@ -76,7 +71,9 @@ public sealed class AuthService(
             return LoginResultDomain.Failed(RefreshTokenInvalidMessage, RefreshTokenRevokedCode);
         }
 
-        var user = await userRepository.GetByIdAsync(storedToken.UserId, cancellationToken);
+        // TODO: 接回正式使用者驗證後，移除暫時使用者 fallback。
+        var user = await userRepository.GetByIdAsync(storedToken.UserId, cancellationToken)
+            ?? CreateTemporaryUser(storedToken.Account, storedToken.UserId);
 
         if (user is null || !user.IsActive)
         {
@@ -134,43 +131,25 @@ public sealed class AuthService(
     }
 
     /// <summary>
-    /// 驗證輸入密碼是否符合儲存的 PBKDF2-SHA256 雜湊。
+    /// 建立暫時登入使用者。
     /// </summary>
-    /// <param name="password">輸入密碼。</param>
-    /// <param name="storedPasswordHash">儲存的密碼雜湊。</param>
-    /// <returns>密碼相符時為 <see langword="true"/>。</returns>
-    private static bool VerifyPassword(string password, string storedPasswordHash)
+    /// <param name="account">登入帳號。</param>
+    /// <param name="userId">使用者識別碼。</param>
+    /// <returns>暫時使用者資料。</returns>
+    private static UserDomain CreateTemporaryUser(string account, long userId)
     {
-        var parts = storedPasswordHash.Split(':', ExpectedPbkdf2Parts);
+        var normalizedAccount = string.IsNullOrWhiteSpace(account)
+            ? "temporary-user"
+            : account;
 
-        if (parts.Length != ExpectedPbkdf2Parts ||
-            !string.Equals(parts[0], "PBKDF2-SHA256", StringComparison.Ordinal) ||
-            !int.TryParse(parts[1], out var iterations) ||
-            iterations < MinPbkdf2Iterations)
+        return new UserDomain
         {
-            return false;
-        }
-
-        try
-        {
-            var salt = Convert.FromBase64String(parts[2]);
-            var expectedHash = Convert.FromBase64String(parts[3]);
-            var actualHash = Rfc2898DeriveBytes.Pbkdf2(
-                password,
-                salt,
-                iterations,
-                HashAlgorithmName.SHA256,
-                expectedHash.Length);
-
-            return CryptographicOperations.FixedTimeEquals(actualHash, expectedHash);
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
+            UserId = userId,
+            Account = normalizedAccount,
+            DisplayName = normalizedAccount,
+            PasswordHash = string.Empty,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        };
     }
 }

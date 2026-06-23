@@ -24,7 +24,7 @@ try
     builder.Services
         .AddB2BOptions(builder.Configuration)
         .AddB2BAuthentication(builder.Configuration)
-        .AddB2BRateLimiting()
+        .AddB2BRateLimiting(builder.Configuration)
         .AddB2BSwagger();
 
     var app = builder.Build();
@@ -43,6 +43,8 @@ try
 
     app.Lifetime.ApplicationStopped.Register(() =>
         logger.Info("B2B_API 已停止。"));
+
+    app.UseB2BForwardedHeaders();
 
     if (!app.Environment.IsDevelopment())
     {

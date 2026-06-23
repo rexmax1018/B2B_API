@@ -25,7 +25,11 @@ public sealed partial class TransactionLogMiddleware(
         "accessToken",
         "refreshToken",
         "token",
-        "authorization"
+        "authorization",
+        "secret",
+        "apiKey",
+        "connectionString",
+        "clientSecret"
     };
 
     private readonly ILogger transactionLogger = loggerFactory.CreateLogger("TransactionLogger");
@@ -46,12 +50,13 @@ public sealed partial class TransactionLogMiddleware(
 
         var stopwatch = Stopwatch.StartNew();
         var requestTime = DateTime.UtcNow;
-        var requestBody = currentOptions.IncludeRequestBody
-            ? await ReadRequestBodyAsync(context, currentOptions.MaxBodyLogLength)
+        var sensitiveNames = BuildSensitiveNames(currentOptions);
+        var requestBody = ShouldReadRequestBody(context, currentOptions)
+            ? await ReadRequestBodyAsync(context, currentOptions, sensitiveNames)
             : null;
 
         var originalResponseBody = context.Response.Body;
-        await using var responseBody = currentOptions.IncludeResponseBody
+        await using var responseBody = ShouldBufferResponseBody(context, currentOptions)
             ? new MemoryStream()
             : null;
 
@@ -68,8 +73,8 @@ public sealed partial class TransactionLogMiddleware(
         {
             stopwatch.Stop();
             var responseTime = DateTime.UtcNow;
-            var responseBodyText = responseBody is not null
-                ? await ReadResponseBodyAsync(context, currentOptions.MaxBodyLogLength)
+            var responseBodyText = responseBody is not null && IsAllowedContentType(context.Response.ContentType, currentOptions)
+                ? await ReadResponseBodyAsync(context, currentOptions, sensitiveNames)
                 : null;
 
             if (responseBody is not null)
@@ -84,11 +89,11 @@ public sealed partial class TransactionLogMiddleware(
                 追蹤編號 = context.TraceIdentifier,
                 HTTP方法 = context.Request.Method,
                 路徑 = context.Request.Path.Value,
-                查詢字串 = MaskText(context.Request.QueryString.Value ?? string.Empty, currentOptions.MaxBodyLogLength),
+                查詢字串 = MaskText(context.Request.QueryString.Value ?? string.Empty, currentOptions.MaxBodyLogLength, sensitiveNames),
                 狀態碼 = context.Response.StatusCode,
                 請求本文 = requestBody,
                 回應本文 = responseBodyText,
-                用戶端IP = GetClientIp(context, currentOptions),
+                用戶端IP = GetClientIp(context),
                 使用者代理 = context.Request.Headers.UserAgent.ToString(),
                 耗時毫秒 = stopwatch.ElapsedMilliseconds,
                 請求時間 = requestTime,
@@ -105,8 +110,16 @@ public sealed partial class TransactionLogMiddleware(
     /// <param name="context">HTTP 內容。</param>
     /// <param name="maxLength">最大紀錄長度。</param>
     /// <returns>遮罩後的請求本文。</returns>
-    private static async Task<string?> ReadRequestBodyAsync(HttpContext context, int maxLength)
+    private static async Task<string?> ReadRequestBodyAsync(
+        HttpContext context,
+        TransactionLogOptions options,
+        IReadOnlySet<string> sensitiveNames)
     {
+        if (context.Request.ContentLength > options.MaxBodyLogLength)
+        {
+            return $"本文長度 {context.Request.ContentLength} bytes 超過紀錄上限 {options.MaxBodyLogLength} bytes，已略過";
+        }
+
         context.Request.EnableBuffering();
 
         using var reader = new StreamReader(
@@ -119,7 +132,7 @@ public sealed partial class TransactionLogMiddleware(
         var body = await reader.ReadToEndAsync(context.RequestAborted);
         context.Request.Body.Position = 0;
 
-        return MaskText(body, maxLength);
+        return MaskText(body, options.MaxBodyLogLength, sensitiveNames);
     }
 
     /// <summary>
@@ -128,9 +141,18 @@ public sealed partial class TransactionLogMiddleware(
     /// <param name="context">HTTP 內容。</param>
     /// <param name="maxLength">最大紀錄長度。</param>
     /// <returns>遮罩後的回應本文。</returns>
-    private static async Task<string?> ReadResponseBodyAsync(HttpContext context, int maxLength)
+    private static async Task<string?> ReadResponseBodyAsync(
+        HttpContext context,
+        TransactionLogOptions options,
+        IReadOnlySet<string> sensitiveNames)
     {
         context.Response.Body.Position = 0;
+
+        if (context.Response.Body.Length > options.MaxBodyLogLength)
+        {
+            context.Response.Body.Position = 0;
+            return $"本文長度 {context.Response.Body.Length} bytes 超過紀錄上限 {options.MaxBodyLogLength} bytes，已略過";
+        }
 
         using var reader = new StreamReader(
             context.Response.Body,
@@ -142,7 +164,7 @@ public sealed partial class TransactionLogMiddleware(
         var body = await reader.ReadToEndAsync(context.RequestAborted);
         context.Response.Body.Position = 0;
 
-        return MaskText(body, maxLength);
+        return MaskText(body, options.MaxBodyLogLength, sensitiveNames);
     }
 
     /// <summary>
@@ -151,14 +173,17 @@ public sealed partial class TransactionLogMiddleware(
     /// <param name="text">來源文字。</param>
     /// <param name="maxLength">最大紀錄長度。</param>
     /// <returns>遮罩後的文字。</returns>
-    private static string? MaskText(string? text, int maxLength)
+    private static string? MaskText(
+        string? text,
+        int maxLength,
+        IReadOnlySet<string> sensitiveNames)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
             return text;
         }
 
-        var masked = TryMaskJson(text) ?? SensitiveQueryRegex().Replace(text, "$1=***");
+        var masked = TryMaskJson(text, sensitiveNames) ?? SensitiveQueryRegex().Replace(text, "$1=***");
 
         return masked.Length <= maxLength
             ? masked
@@ -170,7 +195,7 @@ public sealed partial class TransactionLogMiddleware(
     /// </summary>
     /// <param name="text">來源文字。</param>
     /// <returns>遮罩後的 JSON；解析失敗時為 <see langword="null"/>。</returns>
-    private static string? TryMaskJson(string text)
+    private static string? TryMaskJson(string text, IReadOnlySet<string> sensitiveNames)
     {
         try
         {
@@ -181,7 +206,7 @@ public sealed partial class TransactionLogMiddleware(
                 return null;
             }
 
-            MaskJsonNode(node);
+            MaskJsonNode(node, sensitiveNames);
 
             return node.ToJsonString();
         }
@@ -195,14 +220,13 @@ public sealed partial class TransactionLogMiddleware(
     /// 遞迴遮罩 JSON 節點中的敏感欄位。
     /// </summary>
     /// <param name="node">JSON 節點。</param>
-    private static void MaskJsonNode(JsonNode node)
+    private static void MaskJsonNode(JsonNode node, IReadOnlySet<string> sensitiveNames)
     {
         if (node is JsonObject jsonObject)
         {
             foreach (var property in jsonObject.ToList())
             {
-                if (property.Key.Contains("password", StringComparison.OrdinalIgnoreCase) ||
-                    SensitiveNames.Contains(property.Key))
+                if (IsSensitiveName(property.Key, sensitiveNames))
                 {
                     jsonObject[property.Key] = "***";
                     continue;
@@ -210,7 +234,7 @@ public sealed partial class TransactionLogMiddleware(
 
                 if (property.Value is not null)
                 {
-                    MaskJsonNode(property.Value);
+                    MaskJsonNode(property.Value, sensitiveNames);
                 }
             }
         }
@@ -220,67 +244,132 @@ public sealed partial class TransactionLogMiddleware(
             {
                 if (item is not null)
                 {
-                    MaskJsonNode(item);
+                    MaskJsonNode(item, sensitiveNames);
                 }
             }
         }
     }
 
     /// <summary>
-    /// 取得用戶端 IP。
+    /// 判斷是否可讀取請求本文。
     /// </summary>
     /// <param name="context">HTTP 內容。</param>
     /// <param name="options">交易紀錄選項。</param>
-    /// <returns>用戶端 IP。</returns>
-    private static string? GetClientIp(HttpContext context, TransactionLogOptions options)
+    /// <returns>可讀取時為 <see langword="true"/>。</returns>
+    private static bool ShouldReadRequestBody(HttpContext context, TransactionLogOptions options)
     {
-        if (options.TrustForwardedHeaders)
-        {
-            return GetFirstHeaderValue(context, "X-Forwarded-For")
-                ?? GetFirstHeaderValue(context, "X-Real-IP")
-                ?? context.Connection.RemoteIpAddress?.ToString();
-        }
-
-        return context.Connection.RemoteIpAddress?.ToString();
+        return options.IncludeRequestBody &&
+            !IsExcludedPath(context, options) &&
+            context.Request.ContentLength is > 0 &&
+            IsAllowedContentType(context.Request.ContentType, options);
     }
 
     /// <summary>
-    /// 取得指定標頭的第一個有效值。
+    /// 判斷是否可緩衝回應本文。
     /// </summary>
     /// <param name="context">HTTP 內容。</param>
-    /// <param name="headerName">標頭名稱。</param>
-    /// <returns>第一個有效標頭值。</returns>
-    private static string? GetFirstHeaderValue(HttpContext context, string headerName)
+    /// <param name="options">交易紀錄選項。</param>
+    /// <returns>可緩衝時為 <see langword="true"/>。</returns>
+    private static bool ShouldBufferResponseBody(HttpContext context, TransactionLogOptions options)
     {
-        if (!context.Request.Headers.TryGetValue(headerName, out var values))
-        {
-            return null;
-        }
-
-        foreach (var value in values)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                continue;
-            }
-
-            var firstValue = value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-                .FirstOrDefault();
-
-            if (!string.IsNullOrWhiteSpace(firstValue) &&
-                !string.Equals(firstValue, "unknown", StringComparison.OrdinalIgnoreCase))
-            {
-                return firstValue;
-            }
-        }
-
-        return null;
+        return options.IncludeResponseBody &&
+            !IsExcludedPath(context, options) &&
+            RequestAcceptsTextResponse(context);
     }
+
+    /// <summary>
+    /// 判斷是否為允許記錄本文的 Content-Type。
+    /// </summary>
+    /// <param name="contentType">Content-Type。</param>
+    /// <param name="options">交易紀錄選項。</param>
+    /// <returns>允許時為 <see langword="true"/>。</returns>
+    private static bool IsAllowedContentType(string? contentType, TransactionLogOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return false;
+        }
+
+        return options.AllowedBodyContentTypes.Any(allowed =>
+            contentType.StartsWith(allowed, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// 判斷路徑是否排除本文紀錄。
+    /// </summary>
+    /// <param name="context">HTTP 內容。</param>
+    /// <param name="options">交易紀錄選項。</param>
+    /// <returns>排除時為 <see langword="true"/>。</returns>
+    private static bool IsExcludedPath(HttpContext context, TransactionLogOptions options)
+    {
+        var path = context.Request.Path.Value;
+
+        return !string.IsNullOrWhiteSpace(path) &&
+            options.ExcludedBodyPathPrefixes.Any(prefix =>
+                path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// 判斷用戶端是否偏好文字型回應。
+    /// </summary>
+    /// <param name="context">HTTP 內容。</param>
+    /// <returns>偏好文字型回應時為 <see langword="true"/>。</returns>
+    private static bool RequestAcceptsTextResponse(HttpContext context)
+    {
+        var acceptHeaders = context.Request.Headers.Accept;
+
+        return acceptHeaders.Count == 0 ||
+            acceptHeaders.Any(value =>
+                !string.IsNullOrWhiteSpace(value) &&
+                (value.Contains("json", StringComparison.OrdinalIgnoreCase) ||
+                    value.Contains("text", StringComparison.OrdinalIgnoreCase) ||
+                    value.Contains("*/*", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>
+    /// 建立敏感欄位名稱集合。
+    /// </summary>
+    /// <param name="options">交易紀錄選項。</param>
+    /// <returns>敏感欄位名稱集合。</returns>
+    private static IReadOnlySet<string> BuildSensitiveNames(TransactionLogOptions options)
+    {
+        var names = new HashSet<string>(SensitiveNames, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in options.SensitiveFieldNames)
+        {
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                names.Add(name);
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// 判斷欄位名稱是否敏感。
+    /// </summary>
+    /// <param name="name">欄位名稱。</param>
+    /// <param name="sensitiveNames">敏感欄位名稱集合。</param>
+    /// <returns>敏感時為 <see langword="true"/>。</returns>
+    private static bool IsSensitiveName(string name, IReadOnlySet<string> sensitiveNames)
+    {
+        return sensitiveNames.Any(sensitiveName =>
+            name.Contains(sensitiveName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// 取得用戶端 IP。
+    /// </summary>
+    /// <param name="context">HTTP 內容。</param>
+    /// <returns>用戶端 IP。</returns>
+    private static string? GetClientIp(HttpContext context) =>
+        context.Connection.RemoteIpAddress?.ToString();
 
     /// <summary>
     /// 取得遮罩查詢字串敏感值的正規表示式。
     /// </summary>
     /// <returns>敏感查詢字串正規表示式。</returns>
-    [GeneratedRegex(@"(?i)(password|accessToken|refreshToken|token|authorization)=([^&\s]+)")]
+    [GeneratedRegex(@"(?i)(password|accessToken|refreshToken|token|authorization|secret|apiKey|connectionString|clientSecret)=([^&\s]+)")]
     private static partial Regex SensitiveQueryRegex();
 }

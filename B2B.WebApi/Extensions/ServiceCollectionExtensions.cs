@@ -1,9 +1,11 @@
 using System.Net;
 using System.Text.Json;
 using B2B.Service.Options;
+using B2B.WebApi.Filters;
 using B2B.WebApi.HealthChecks;
 using B2B.WebApi.Model.Common;
 using B2B.WebApi.Options;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -37,6 +39,39 @@ public static class ServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddOptions<RateLimitOptions>()
+            .Bind(configuration.GetSection(RateLimitOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddOptions<B2BForwardedHeadersOptions>()
+            .Bind(configuration.GetSection(B2BForwardedHeadersOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            var forwardedHeadersOptions = configuration
+                .GetSection(B2BForwardedHeadersOptions.SectionName)
+                .Get<B2BForwardedHeadersOptions>() ?? new B2BForwardedHeadersOptions();
+
+            if (!forwardedHeadersOptions.Enabled)
+            {
+                return;
+            }
+
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+            options.ForwardLimit = forwardedHeadersOptions.ForwardLimit;
+
+            foreach (var knownProxy in forwardedHeadersOptions.KnownProxies)
+            {
+                if (IPAddress.TryParse(knownProxy, out var ipAddress))
+                {
+                    options.KnownProxies.Add(ipAddress);
+                }
+            }
+        });
+
         services.AddMemoryCache();
         services.AddHealthChecks()
             .AddCheck(
@@ -55,8 +90,13 @@ public static class ServiceCollectionExtensions
     /// </summary>
     /// <param name="services">服務集合。</param>
     /// <returns>服務集合。</returns>
-    public static IServiceCollection AddB2BRateLimiting(this IServiceCollection services)
+    public static IServiceCollection AddB2BRateLimiting(
+        this IServiceCollection services,
+        IConfiguration configuration)
     {
+        var rateLimitOptions = configuration.GetSection(RateLimitOptions.SectionName).Get<RateLimitOptions>()
+            ?? new RateLimitOptions();
+
         services.AddRateLimiter(options =>
         {
             options.OnRejected = async (context, cancellationToken) =>
@@ -66,7 +106,8 @@ public static class ServiceCollectionExtensions
 
                 var response = ApiResponse<object>.Fail(
                     "請求過於頻繁，請稍後再試",
-                    new ErrorResponse("RATE_LIMITED", "請求過於頻繁，請稍後再試"));
+                    new ErrorResponse("RATE_LIMITED", "請求過於頻繁，請稍後再試"),
+                    context.HttpContext.TraceIdentifier);
 
                 await context.HttpContext.Response.WriteAsync(
                     JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
@@ -76,15 +117,16 @@ public static class ServiceCollectionExtensions
             options.AddPolicy("Auth", httpContext =>
             {
                 var partitionKey = BuildAuthRateLimitPartitionKey(httpContext);
+                var authOptions = rateLimitOptions.Auth;
 
                 return RateLimitPartition.GetFixedWindowLimiter(
                     partitionKey,
                     _ => new FixedWindowRateLimiterOptions
                     {
-                        PermitLimit = 5,
-                        Window = TimeSpan.FromMinutes(1),
+                        PermitLimit = authOptions.PermitLimit,
+                        Window = TimeSpan.FromSeconds(authOptions.WindowSeconds),
                         QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                        QueueLimit = 0
+                        QueueLimit = authOptions.QueueLimit
                     });
             });
         });
@@ -99,17 +141,27 @@ public static class ServiceCollectionExtensions
     /// <returns>服務集合。</returns>
     public static IServiceCollection AddB2BSwagger(this IServiceCollection services)
     {
-        services.AddControllers()
+        services.AddControllers(options =>
+            {
+                options.Filters.Add<ApiResponseTraceIdFilter>();
+            })
             .ConfigureApiBehaviorOptions(options =>
             {
                 options.InvalidModelStateResponseFactory = context =>
                 {
-                    var errors = context.ModelState
+                    var validationErrors = context.ModelState
                         .Where(x => x.Value?.Errors.Count > 0)
-                        .SelectMany(x => x.Value!.Errors.Select(error =>
+                        .ToDictionary(
+                            x => x.Key,
+                            x => x.Value!.Errors.Select(error =>
                             string.IsNullOrWhiteSpace(error.ErrorMessage)
                                 ? $"{x.Key} 欄位格式不正確"
-                                : error.ErrorMessage))
+                                : error.ErrorMessage).ToArray())
+                        .Where(x => x.Value.Length > 0)
+                        .ToDictionary(x => x.Key, x => x.Value);
+
+                    var errors = validationErrors
+                        .SelectMany(x => x.Value)
                         .ToArray();
 
                     var message = errors.Length == 0
@@ -118,7 +170,11 @@ public static class ServiceCollectionExtensions
 
                     return new BadRequestObjectResult(ApiResponse<object>.Fail(
                         "請求驗證失敗",
-                        new ErrorResponse("VALIDATION_FAILED", message)));
+                        new ErrorResponse("VALIDATION_FAILED", message)
+                        {
+                            ValidationErrors = validationErrors
+                        },
+                        context.HttpContext.TraceIdentifier));
                 };
             });
         services.AddEndpointsApiExplorer();

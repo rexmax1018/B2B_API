@@ -47,7 +47,8 @@ public sealed class ExceptionHandlingMiddleware(
 
             var response = ApiResponse<object>.Fail(
                 "系統發生錯誤",
-                new ErrorResponse("SYS_ERROR", "系統發生錯誤"));
+                new ErrorResponse("SYS_ERROR", "系統發生錯誤"),
+                context.TraceIdentifier);
 
             await context.Response.WriteAsync(
                 JsonSerializer.Serialize(response, JsonSerializerOptions),

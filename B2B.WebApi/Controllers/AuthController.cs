@@ -32,8 +32,8 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await authService.LoginAsync(
-            request.Account,
-            request.Password,
+            request.Account ?? string.Empty,
+            request.Password ?? string.Empty,
             cancellationToken);
 
         if (!result.Success || result.Token is null)

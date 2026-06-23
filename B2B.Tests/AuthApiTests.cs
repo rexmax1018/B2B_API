@@ -26,6 +26,7 @@ public sealed class AuthApiTests(B2BWebApiFactory factory) : IClassFixture<B2BWe
         Assert.NotNull(payload);
         Assert.True(payload.Success);
         Assert.Equal("OK", payload.Data);
+        Assert.False(string.IsNullOrWhiteSpace(payload.TraceId));
     }
 
     /// <summary>
@@ -42,10 +43,10 @@ public sealed class AuthApiTests(B2BWebApiFactory factory) : IClassFixture<B2BWe
     }
 
     /// <summary>
-    /// 驗證錯誤帳密會回傳未授權的標準 API 回應。
+    /// 驗證任意帳密會暫時放行並回傳權杖。
     /// </summary>
     [Fact]
-    public async Task Login_WithInvalidCredentials_ReturnsUnauthorizedApiResponse()
+    public async Task Login_WithAnyCredentials_ReturnsTokenTemporarily()
     {
         var client = factory.CreateClient();
         var request = new LoginRequest
@@ -56,19 +57,20 @@ public sealed class AuthApiTests(B2BWebApiFactory factory) : IClassFixture<B2BWe
 
         var response = await client.PostAsJsonAsync("/api/auth/login", request);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var payload = await response.Content.ReadFromJsonAsync<ApiResponse<LoginResponse>>();
         Assert.NotNull(payload);
-        Assert.False(payload.Success);
-        Assert.Equal("AUTH_FAILED", payload.Error?.Code);
+        Assert.True(payload.Success);
+        Assert.False(string.IsNullOrWhiteSpace(payload.Data?.AccessToken));
+        Assert.False(string.IsNullOrWhiteSpace(payload.TraceId));
     }
 
     /// <summary>
-    /// 驗證模型驗證錯誤會回傳標準 API 回應。
+    /// 驗證空白帳密會暫時放行並回傳權杖。
     /// </summary>
     [Fact]
-    public async Task Login_WithInvalidModel_ReturnsValidationApiResponse()
+    public async Task Login_WithBlankCredentials_ReturnsTokenTemporarily()
     {
         var client = factory.CreateClient();
         var request = new LoginRequest
@@ -79,12 +81,13 @@ public sealed class AuthApiTests(B2BWebApiFactory factory) : IClassFixture<B2BWe
 
         var response = await client.PostAsJsonAsync("/api/auth/login", request);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var payload = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
+        var payload = await response.Content.ReadFromJsonAsync<ApiResponse<LoginResponse>>();
         Assert.NotNull(payload);
-        Assert.False(payload.Success);
-        Assert.Equal("VALIDATION_FAILED", payload.Error?.Code);
+        Assert.True(payload.Success);
+        Assert.False(string.IsNullOrWhiteSpace(payload.Data?.AccessToken));
+        Assert.False(string.IsNullOrWhiteSpace(payload.TraceId));
     }
 
     /// <summary>
@@ -116,5 +119,6 @@ public sealed class AuthApiTests(B2BWebApiFactory factory) : IClassFixture<B2BWe
         Assert.NotNull(payload);
         Assert.False(payload.Success);
         Assert.Equal("RATE_LIMITED", payload.Error?.Code);
+        Assert.False(string.IsNullOrWhiteSpace(payload.TraceId));
     }
 }

@@ -35,25 +35,27 @@ public sealed class AuthServiceTests
     }
 
     /// <summary>
-    /// 驗證密碼錯誤時不會簽發權杖。
+    /// 驗證密碼錯誤時仍會暫時放行並簽發權杖。
     /// </summary>
     [Fact]
-    public async Task LoginAsync_WithInvalidPassword_ReturnsFailureAndDoesNotIssueToken()
+    public async Task LoginAsync_WithInvalidPassword_ReturnsTokenTemporarily()
     {
         var repository = new FakeUserRepository();
         var user = CreateActiveUser(password: "Valid-password-1");
         repository.Add(user);
 
+        var issuedToken = CreateToken("refresh-token-2");
         var tokenService = new QueueTokenService();
+        tokenService.Enqueue(issuedToken);
         var refreshTokenStore = new SpyRefreshTokenStore();
         var service = new AuthService(repository, tokenService, refreshTokenStore);
 
         var result = await service.LoginAsync(user.Account, "wrong-password", CancellationToken.None);
 
-        Assert.False(result.Success);
-        Assert.Equal("帳號或密碼錯誤", result.Message);
-        Assert.Equal(0, tokenService.GenerateTokenCallCount);
-        Assert.Empty(refreshTokenStore.SavedTokens);
+        Assert.True(result.Success);
+        Assert.Same(issuedToken, result.Token);
+        Assert.Equal(1, tokenService.GenerateTokenCallCount);
+        Assert.True(refreshTokenStore.SavedTokens.ContainsKey(issuedToken.RefreshToken));
     }
 
     /// <summary>
