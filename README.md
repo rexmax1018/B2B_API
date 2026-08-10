@@ -32,9 +32,9 @@ B2B_API
 ├─ B2B.WebApi              API Host、Controller、Middleware、Swagger、驗證與安全設定
 ├─ B2B.WebApi.Model        API 請求與回應模型
 ├─ B2B.Service             Service 介面、Options 與跨層抽象
-├─ B2B.Service.Impl        Auth / User / Token Service 實作
+├─ B2B.Service.Impl        Auth / User Query / Token Service 實作
 ├─ B2B.Domain              Domain Model 與領域資料結構
-├─ B2B.Dao                 DbContext、Repository、DAO Module
+├─ B2B.Dao                 DbContext、User Repository、DAO Module
 ├─ B2B.Conn                AWS 離線環境連線資訊解析、INI 讀取、解密
 ├─ B2B.Tests               測試專案
 └─ resources/B2B_Conn      B2B.Conn 還原參考截圖
@@ -47,8 +47,8 @@ B2B_API
 | `B2B.WebApi` | API 啟動、Controller、Middleware、Swagger、認證授權、Rate Limit、Health Check | HTTP API |
 | `B2B.WebApi.Model` | API DTO 與共用回應格式 | `ApiResponse<T>`、Login/Refresh Request |
 | `B2B.Service` | Service 介面與 Options | `IAuthService`、`ITokenService`、`JwtOptions` |
-| `B2B.Service.Impl` | 商業流程實作 | Login、Refresh Token、Logout、JWT 產生 |
-| `B2B.Domain` | Domain Model | User、Token、Login Result |
+| `B2B.Service.Impl` | 商業流程實作 | Entry Login、User Query、Refresh Token、JWT 產生 |
+| `B2B.Domain` | Domain Model | Service Identity、User、Token、Login Result |
 | `B2B.Dao` | 資料存取 | `B2BDbContext`、`IUserRepository`、Oracle Repository |
 | `B2B.Conn` | 連線帳密解析 | `B2B_Conn.GetEntityInfo(...)` |
 | `B2B.Tests` | 測試與 WebApi Factory | 測試用 Host 與設定覆寫 |
@@ -75,7 +75,6 @@ flowchart LR
     ServiceImpl --> Service
     ServiceImpl --> Domain
     ServiceImpl --> Dao
-
     Dao --> Domain
     Dao --> Conn
 
@@ -83,7 +82,6 @@ flowchart LR
     Tests --> WebApiModel
     Tests --> Service
     Tests --> ServiceImpl
-    Tests --> Dao
     Tests --> Domain
 ```
 
@@ -91,9 +89,9 @@ flowchart LR
 
 - `B2B.WebApi` 是 Composition Root，負責組裝所有 Module。
 - `B2B.Service` 只定義介面與 Options，不依賴實作層。
-- `B2B.Service.Impl` 依賴 `B2B.Dao` 取得資料。
-- `B2B.Dao` 依賴 `B2B.Conn` 取得 Oracle 連線資訊。
-- `B2B.Conn` 不需要被其他專案直接呼叫，外部主要透過 `B2B.Dao` 間接使用。
+- `B2B.Service.Impl` 的 AuthService 只負責服務憑證與 Token；UserService 則依賴 `B2B.Dao` 提供查詢。
+- `B2B.Dao` 依賴 `B2B.Conn` 取得 Oracle 連線資訊，供 User 查詢與 readiness health check 使用。
+- `B2B.Conn` 不需要被 Entry 憑證認證流程直接呼叫。
 
 ## NuGet 相依關係
 
@@ -419,28 +417,25 @@ flowchart TB
 
 ```mermaid
 flowchart TD
-    RequestRepo["Service 呼叫 IUserRepository"]
+    UserApi["UsersController"]
+    UserService["IUserService"]
     RepoSwitch["B2BDaoModule 判斷<br/>UseFakeRepositories"]
     Fake["InMemoryUserRepository"]
-    OracleRepo["OracleUserRepository"]
+    OracleRepo["UserRepository"]
+    Health["OracleHealthCheck"]
     DbContext["B2BDbContext"]
     ConnInfo["B2B.Conn 提供連線資訊"]
     OracleDb["Oracle Database"]
 
-    RequestRepo --> RepoSwitch
+    UserApi --> UserService --> RepoSwitch
     RepoSwitch -->|true| Fake
-    RepoSwitch -->|false| OracleRepo
-    OracleRepo --> DbContext
+    RepoSwitch -->|false| OracleRepo --> DbContext
+    Health --> DbContext
     ConnInfo --> DbContext
     DbContext --> OracleDb
 ```
 
-`DataAccess:UseFakeRepositories` 可切換資料來源：
-
-- `true`：使用記憶體 Repository，適合開發或測試。
-- `false`：使用 Oracle Repository，連線資訊由 `B2B.Conn` 提供。
-
-正式環境不可啟用 Fake Repository，啟動檢查會阻擋此設定。
+Entry 憑證登入與 User 查詢是兩條獨立流程：JWT 簽發不讀取 User Repository；已驗證的服務可透過 `IUserService` 查詢使用者。`DataAccess:UseFakeRepositories` 可讓開發與測試使用記憶體 Repository，正式環境必須為 `false`。
 
 ## 登入流程
 
@@ -449,21 +444,33 @@ sequenceDiagram
     participant Client as Client
     participant Controller as AuthController
     participant Auth as AuthService
-    participant Repo as IUserRepository
+    participant Credential as EntryCredentialValidator
+    participant Entry as Entry.ini
     participant Token as TokenService
     participant Store as IRefreshTokenStore
 
-    Client->>Controller: POST /api/auth/login
-    Controller->>Auth: LoginAsync(request)
-    Auth->>Repo: 依帳號查詢使用者
-    Repo-->>Auth: UserDomain
-    Auth->>Auth: 驗證密碼與帳號狀態
+    Client->>Controller: POST /api/auth/login (encryptedCredential)
+    Controller->>Auth: LoginAsync(encryptedCredential)
+    Auth->>Credential: IsValid(encryptedCredential)
+    Credential->>Entry: 載入 AES-GCM 密文（啟動時）
+    Credential-->>Auth: 常數時間比對結果
     Auth->>Token: 建立 Access Token 與 Refresh Token
     Token-->>Auth: LoginResultDomain
     Auth->>Store: 儲存 Refresh Token
     Auth-->>Controller: 登入結果
     Controller-->>Client: ApiResponse LoginResponse
 ```
+
+登入請求只接受 `encryptedCredential`，即其他專案讀取其 `Entry.ini` 後原樣傳入的 AES-GCM 密文。比對成功後，JWT 會代表固定的 `entry-credential` 服務身分，而非資料庫使用者。
+
+## User 查詢流程
+
+`UsersController` 要求有效的 Service JWT，並透過 `IUserService` 查詢使用者。回應只包含 `UserId`、`Account`、`DisplayName`、`IsActive` 與 `CreatedAt`，絕不回傳 `PasswordHash`。
+
+| Method | Route | 說明 |
+| --- | --- | --- |
+| `GET` | `/api/users/{userId}` | 依使用者識別碼查詢 |
+| `GET` | `/api/users/by-account/{account}` | 依登入帳號查詢 |
 
 登入成功後會回傳：
 
@@ -479,15 +486,12 @@ sequenceDiagram
     participant Controller as AuthController
     participant Auth as AuthService
     participant Store as IRefreshTokenStore
-    participant Repo as IUserRepository
     participant Token as TokenService
 
     Client->>Controller: POST /api/auth/refresh-token
     Controller->>Auth: RefreshTokenAsync(request)
     Auth->>Store: 驗證並消耗舊 Refresh Token
     Store-->>Auth: Token 記錄
-    Auth->>Repo: 重新取得使用者資訊
-    Repo-->>Auth: UserDomain
     Auth->>Token: 產生新 Access Token 與 Refresh Token
     Auth->>Store: 儲存新 Refresh Token
     Auth-->>Controller: 新 Token 結果
@@ -495,6 +499,18 @@ sequenceDiagram
 ```
 
 Refresh Token 採用輪替機制。舊 Token 使用後會失效，並由服務產生新的 Token 組合。
+
+### Entry.ini 憑證
+
+根目錄的 `Entry.ini` 必須只有一行 `AES-GCM-V1:<Base64 payload>`。建置與發佈時會將檔案複製至 Web API 的應用程式根目錄；其他專案必須部署相同檔案，並將整行內容放入登入請求：
+
+```json
+{
+  "encryptedCredential": "<Entry.ini 的完整內容>"
+}
+```
+
+版控中的值是公開 AES-GCM 開發範例。Production 或 Staging 等非 Development 環境會拒絕這個範例，部署前必須以專屬的 AES-GCM 密文取代。密文本身是可重放的共享憑證，僅能經由 HTTPS 傳送，且不應寫入日誌、原始碼或版本控制。
 
 ## 登出流程
 

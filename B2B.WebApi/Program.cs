@@ -1,5 +1,6 @@
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
+using B2B.Service.Interfaces;
 using B2B.WebApi.Modules;
 using B2B.WebApi.Extensions;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -30,6 +31,13 @@ try
     var app = builder.Build();
 
     SecurityConfigurationValidator.Validate(app);
+    var entryCredentialValidator = app.Services.GetRequiredService<IEntryCredentialValidator>();
+
+    if (!app.Environment.IsDevelopment() && entryCredentialValidator.IsDevelopmentFixture)
+    {
+        throw new InvalidOperationException(
+            "Entry.ini 仍是公開開發範例，非 Development 環境必須改用專屬的 AES-GCM 密文。");
+    }
 
     app.Lifetime.ApplicationStarted.Register(() =>
         logger.Info(

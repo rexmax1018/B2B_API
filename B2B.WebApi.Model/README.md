@@ -76,11 +76,12 @@ flowchart TB
 
 | 模型 | 用途 |
 | --- | --- |
-| `LoginRequest` | 登入請求，包含帳號與密碼 |
+| `LoginRequest` | 登入請求，包含 AES 加密的 `encryptedCredential` |
 | `LoginResponse` | 登入成功回應，包含 Token 與使用者資訊 |
 | `RefreshTokenRequest` | Refresh Token 換發請求 |
 | `RefreshTokenResponse` | Refresh Token 換發成功回應 |
 | `LogoutRequest` | 登出請求，包含要撤銷的 Refresh Token |
+| `UserResponse` | 使用者查詢回應；不含 PasswordHash |
 
 ## 使用方式
 
@@ -99,8 +100,8 @@ public async Task<ActionResult<ApiResponse<LoginResponse>>> Login(
 
 ```csharp
 return Unauthorized(ApiResponse<LoginResponse>.Fail(
-    "登入失敗",
-    new ErrorResponse("AUTH_FAILED", "登入失敗")));
+    "憑證驗證失敗",
+    new ErrorResponse("INVALID_ENTRY_CREDENTIAL", "憑證驗證失敗")));
 ```
 
 ## 維護注意事項

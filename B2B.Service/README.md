@@ -21,9 +21,9 @@ flowchart LR
 | 路徑 | 說明 |
 | --- | --- |
 | `IAuthService.cs` | 登入、Refresh Token、登出流程介面 |
-| `IUserService.cs` | 使用者服務介面 |
+| `IUserService.cs` | Web API 使用者查詢服務介面 |
 | `ITokenService.cs` | Token 產生介面 |
-| `Interfaces/` | 其他服務抽象，例如 `IRefreshTokenStore` |
+| `Interfaces/` | 其他服務抽象，例如 `IEntryCredentialValidator`、`IRefreshTokenStore` |
 | `Options/` | 服務層 Options，例如 `JwtOptions` |
 
 ## 是否使用 Module

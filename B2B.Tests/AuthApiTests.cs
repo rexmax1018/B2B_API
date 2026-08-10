@@ -43,16 +43,15 @@ public sealed class AuthApiTests(B2BWebApiFactory factory) : IClassFixture<B2BWe
     }
 
     /// <summary>
-    /// 驗證任意帳密會暫時放行並回傳權杖。
+    /// 驗證相符的加密 Entry 憑證會回傳權杖。
     /// </summary>
     [Fact]
-    public async Task Login_WithAnyCredentials_ReturnsTokenTemporarily()
+    public async Task Login_WithMatchingEncryptedCredential_ReturnsToken()
     {
         var client = factory.CreateClient();
         var request = new LoginRequest
         {
-            Account = "missing-user",
-            Password = "wrong-password"
+            EncryptedCredential = ReadEntryCredential()
         };
 
         var response = await client.PostAsJsonAsync("/api/auth/login", request);
@@ -67,26 +66,25 @@ public sealed class AuthApiTests(B2BWebApiFactory factory) : IClassFixture<B2BWe
     }
 
     /// <summary>
-    /// 驗證空白帳密會暫時放行並回傳權杖。
+    /// 驗證不相符的加密 Entry 憑證會被拒絕。
     /// </summary>
     [Fact]
-    public async Task Login_WithBlankCredentials_ReturnsTokenTemporarily()
+    public async Task Login_WithUnrecognizedEncryptedCredential_ReturnsUnauthorized()
     {
         var client = factory.CreateClient();
         var request = new LoginRequest
         {
-            Account = "",
-            Password = "short"
+            EncryptedCredential = "AES-GCM-V1:AAAAAAAAAAAAAAAAA4jazmC2o5LzKMK5cbL+eKtuR9Qs7BO99TpnshJXvd0="
         };
 
         var response = await client.PostAsJsonAsync("/api/auth/login", request);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 
         var payload = await response.Content.ReadFromJsonAsync<ApiResponse<LoginResponse>>();
         Assert.NotNull(payload);
-        Assert.True(payload.Success);
-        Assert.False(string.IsNullOrWhiteSpace(payload.Data?.AccessToken));
+        Assert.False(payload.Success);
+        Assert.Equal("INVALID_ENTRY_CREDENTIAL", payload.Error?.Code);
         Assert.False(string.IsNullOrWhiteSpace(payload.TraceId));
     }
 
@@ -100,8 +98,7 @@ public sealed class AuthApiTests(B2BWebApiFactory factory) : IClassFixture<B2BWe
         client.DefaultRequestHeaders.UserAgent.ParseAdd("B2B.Tests.RateLimit");
         var request = new LoginRequest
         {
-            Account = "missing-user",
-            Password = "wrong-password"
+            EncryptedCredential = ReadEntryCredential()
         };
 
         HttpResponseMessage? response = null;
@@ -120,5 +117,15 @@ public sealed class AuthApiTests(B2BWebApiFactory factory) : IClassFixture<B2BWe
         Assert.False(payload.Success);
         Assert.Equal("RATE_LIMITED", payload.Error?.Code);
         Assert.False(string.IsNullOrWhiteSpace(payload.TraceId));
+    }
+
+    /// <summary>
+    /// 讀取測試 Host 複製到輸出目錄的 Entry 憑證。
+    /// </summary>
+    /// <returns>AES 加密的 Entry 憑證。</returns>
+    private static string ReadEntryCredential()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Entry.ini");
+        return File.ReadAllText(path).Trim();
     }
 }

@@ -1,15 +1,13 @@
-namespace B2B.Dao.Entities;
+namespace B2B.WebApi.Model.User;
 
 /// <summary>
-/// 表示 B2B_USER 資料表的使用者資料。
+/// 表示可安全回傳給 API 呼叫端的使用者資料。
 /// </summary>
-public sealed class UserEntity
+public sealed class UserResponse
 {
     public long UserId { get; set; }
     public string Account { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
-    public string PasswordHash { get; set; } = string.Empty;
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
-    public DateTime? UpdatedAt { get; set; }
 }

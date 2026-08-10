@@ -8,15 +8,13 @@ namespace B2B.Service.Interfaces;
 public interface IAuthService
 {
     /// <summary>
-    /// 驗證帳號密碼並簽發權杖。
+    /// 驗證 AES 加密 Entry 憑證並簽發權杖。
     /// </summary>
-    /// <param name="account">登入帳號。</param>
-    /// <param name="password">登入密碼。</param>
+    /// <param name="encryptedCredential">其他專案傳入的 AES 加密 Entry 憑證。</param>
     /// <param name="cancellationToken">取消權杖。</param>
     /// <returns>登入處理結果。</returns>
     Task<LoginResultDomain> LoginAsync(
-        string account,
-        string password,
+        string encryptedCredential,
         CancellationToken cancellationToken);
 
     /// <summary>

@@ -19,7 +19,7 @@ namespace B2B.WebApi.Controllers;
 public sealed class AuthController(IAuthService authService) : ControllerBase
 {
     /// <summary>
-    /// 驗證帳號密碼並取得權杖。
+    /// 驗證 AES 加密 Entry 憑證並取得權杖。
     /// </summary>
     /// <param name="request">登入請求。</param>
     /// <param name="cancellationToken">取消權杖。</param>
@@ -32,15 +32,14 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await authService.LoginAsync(
-            request.Account ?? string.Empty,
-            request.Password ?? string.Empty,
+            request.EncryptedCredential,
             cancellationToken);
 
         if (!result.Success || result.Token is null)
         {
             return Unauthorized(ApiResponse<LoginResponse>.Fail(
                 result.Message ?? "登入失敗",
-                new ErrorResponse("AUTH_FAILED", result.Message ?? "登入失敗")));
+                new ErrorResponse(result.ErrorCode ?? "INVALID_ENTRY_CREDENTIAL", result.Message ?? "登入失敗")));
         }
 
         return Ok(ApiResponse<LoginResponse>.Ok(result.Token.ToLoginResponse()));

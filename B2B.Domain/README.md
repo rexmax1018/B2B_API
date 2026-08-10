@@ -22,7 +22,8 @@ flowchart TB
 
 | 檔案或路徑 | 說明 |
 | --- | --- |
-| `UserDomain.cs` | 使用者領域資料 |
+| `ServiceDomain.cs` | Entry 憑證代表的服務身分資料 |
+| `UserDomain.cs` | Web API 可查詢的使用者領域資料 |
 | `TokenDomain.cs` | Token 領域資料 |
 | `LoginResultDomain.cs` | 登入與 Token 換發結果 |
 | `RefreshTokenDomain.cs` | Refresh Token 狀態資料 |
@@ -40,27 +41,23 @@ flowchart TB
 
 ## 使用方式
 
-DAO 將 Entity 轉為 Domain：
-
-```csharp
-UserDomain? user = await userRepository.GetByAccountAsync(account, cancellationToken);
-```
-
 Service 回傳 Domain 結果：
 
 ```csharp
-LoginResultDomain result = await authService.LoginAsync(account, password, cancellationToken);
+LoginResultDomain result = await authService.LoginAsync(encryptedCredential, cancellationToken);
 ```
 
-WebApi 再將 Domain 轉為 API Response DTO：
+WebApi 再將 Token 或 User Domain 轉為 API Response DTO：
 
 ```mermaid
 flowchart LR
-    Entity["EF Entity"]
-    Domain["Domain Model"]
+    ServiceIdentity["ServiceDomain"]
+    User["UserDomain"]
+    Domain["TokenDomain"]
     Dto["WebApi DTO"]
 
-    Entity --> Domain --> Dto
+    ServiceIdentity --> Domain --> Dto
+    User --> Dto
 ```
 
 ## 維護注意事項

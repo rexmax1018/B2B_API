@@ -72,7 +72,7 @@ flowchart TD
 }
 ```
 
-這讓測試可以避免直接依賴正式 Oracle 連線。
+測試以記憶體 Repository 查詢 User，因此不會直接依賴正式 Oracle 連線。
 
 ## 執行方式
 

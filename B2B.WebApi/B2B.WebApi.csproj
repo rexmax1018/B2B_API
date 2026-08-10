@@ -27,4 +27,11 @@
     <ProjectReference Include="..\B2B.Dao\B2B.Dao.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\Entry.ini" Link="Entry.ini">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

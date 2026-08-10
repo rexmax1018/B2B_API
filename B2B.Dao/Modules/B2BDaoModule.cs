@@ -9,12 +9,12 @@ using Microsoft.Extensions.Configuration;
 namespace B2B.Dao.Modules;
 
 /// <summary>
-/// 註冊資料存取層所需的 Autofac 服務。
+/// 註冊 Oracle 連線、使用者查詢與健康檢查所需的 Autofac 服務。
 /// </summary>
 public sealed class B2BDaoModule : Autofac.Module
 {
     /// <summary>
-    /// 註冊資料庫連線設定、DbContext 與使用者資料存取實作。
+    /// 註冊資料庫連線設定、DbContext 與使用者查詢實作。
     /// </summary>
     /// <param name="builder">Autofac 容器建構器。</param>
     protected override void Load(ContainerBuilder builder)
@@ -77,6 +77,7 @@ public sealed class B2BDaoModule : Autofac.Module
             })
             .As<IUserRepository>()
             .InstancePerLifetimeScope();
+
     }
 
     /// <summary>

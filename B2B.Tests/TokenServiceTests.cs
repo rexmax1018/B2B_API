@@ -1,5 +1,4 @@
 using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
 using B2B.Domain;
 using B2B.Service.Impl.Services;
 using B2B.Service.Options;
@@ -26,16 +25,13 @@ public sealed class TokenServiceTests
             AccessTokenMinutes = 30,
             RefreshTokenDays = 14
         }));
-        var user = new UserDomain
+        var serviceIdentity = new ServiceDomain
         {
-            UserId = 99,
-            Account = "tester",
-            DisplayName = "測試使用者",
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow
+            ServiceId = "test-service",
+            ServiceName = "測試服務"
         };
 
-        var token = service.GenerateToken(user);
+        var token = service.GenerateToken(serviceIdentity);
 
         Assert.Equal("Bearer", token.TokenType);
         Assert.Equal(1800, token.ExpiresIn);
@@ -49,11 +45,9 @@ public sealed class TokenServiceTests
         Assert.Equal("B2B_API_TEST", jwt.Issuer);
         Assert.Contains("B2B_API_TEST_CLIENT", jwt.Audiences);
         Assert.Contains(jwt.Claims, claim =>
-            claim.Type == ClaimTypes.NameIdentifier && claim.Value == user.UserId.ToString());
+            claim.Type == JwtRegisteredClaimNames.Sub && claim.Value == serviceIdentity.ServiceId);
         Assert.Contains(jwt.Claims, claim =>
-            claim.Type == ClaimTypes.Name && claim.Value == user.DisplayName);
-        Assert.Contains(jwt.Claims, claim =>
-            claim.Type == "account" && claim.Value == user.Account);
+            claim.Type == "service_name" && claim.Value == serviceIdentity.ServiceName);
         Assert.InRange(token.AccessTokenExpiresAt, DateTime.UtcNow.AddMinutes(29), DateTime.UtcNow.AddMinutes(31));
         Assert.InRange(token.RefreshTokenExpiresAt, DateTime.UtcNow.AddDays(13), DateTime.UtcNow.AddDays(15));
     }

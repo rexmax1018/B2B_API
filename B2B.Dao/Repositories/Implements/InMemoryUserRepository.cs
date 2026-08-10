@@ -21,48 +21,25 @@ public sealed class InMemoryUserRepository : IUserRepository
         }
     ];
 
-    /// <summary>
-    /// 從記憶體資料來源依登入帳號取得使用者資料。
-    /// </summary>
-    /// <param name="account">登入帳號。</param>
-    /// <param name="cancellationToken">取消權杖。</param>
-    /// <returns>使用者資料；找不到時為 <see langword="null"/>。</returns>
+    /// <inheritdoc />
     public Task<UserDomain?> GetByAccountAsync(string account, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
-        var user = Users.FirstOrDefault(x =>
-            string.Equals(x.Account, account, StringComparison.OrdinalIgnoreCase));
-
+        var user = Users.FirstOrDefault(x => string.Equals(x.Account, account, StringComparison.OrdinalIgnoreCase));
         return Task.FromResult(user?.Clone());
     }
 
-    /// <summary>
-    /// 從記憶體資料來源依使用者識別碼取得使用者資料。
-    /// </summary>
-    /// <param name="userId">使用者識別碼。</param>
-    /// <param name="cancellationToken">取消權杖。</param>
-    /// <returns>使用者資料；找不到時為 <see langword="null"/>。</returns>
+    /// <inheritdoc />
     public Task<UserDomain?> GetByIdAsync(long userId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
         var user = Users.FirstOrDefault(x => x.UserId == userId);
-
         return Task.FromResult(user?.Clone());
     }
 }
 
-/// <summary>
-/// 提供使用者領域模型複製方法。
-/// </summary>
 internal static class UserDomainCloneExtensions
 {
-    /// <summary>
-    /// 複製使用者領域模型，避免共用可變狀態。
-    /// </summary>
-    /// <param name="user">來源使用者。</param>
-    /// <returns>複製後的使用者。</returns>
     public static UserDomain Clone(this UserDomain user) => new()
     {
         UserId = user.UserId,
