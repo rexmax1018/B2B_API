@@ -21,11 +21,6 @@ public sealed class LoginResultDomain
     public string? ErrorCode { get; set; }
 
     /// <summary>
-    /// 取得或設定成功登入的使用者資料。
-    /// </summary>
-    public UserDomain? User { get; set; }
-
-    /// <summary>
     /// 取得或設定成功簽發的權杖資料。
     /// </summary>
     public TokenDomain? Token { get; set; }
@@ -46,13 +41,11 @@ public sealed class LoginResultDomain
     /// <summary>
     /// 建立成功的登入結果。
     /// </summary>
-    /// <param name="user">使用者資料。</param>
     /// <param name="token">權杖資料。</param>
     /// <returns>成功結果。</returns>
-    public static LoginResultDomain Succeeded(UserDomain user, TokenDomain token) => new()
+    public static LoginResultDomain Succeeded(TokenDomain token) => new()
     {
         Success = true,
-        User = user,
         Token = token
     };
 }

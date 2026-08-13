@@ -1,74 +1,8 @@
-using System.Security.Cryptography;
-using B2B.Dao.Repositories.Interfaces;
 using B2B.Domain;
 using B2B.Domain.Models;
 using B2B.Service.Interfaces;
 
 namespace B2B.Tests;
-
-/// <summary>
-/// 測試用的記憶體使用者資料來源。
-/// </summary>
-internal sealed class FakeUserRepository : IUserRepository
-{
-    private readonly Dictionary<long, UserDomain> usersById = [];
-    private readonly Dictionary<string, UserDomain> usersByAccount = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// 加入測試使用者。
-    /// </summary>
-    /// <param name="user">使用者資料。</param>
-    public void Add(UserDomain user)
-    {
-        usersById[user.UserId] = Clone(user);
-        usersByAccount[user.Account] = Clone(user);
-    }
-
-    /// <summary>
-    /// 從測試資料來源依登入帳號取得使用者資料。
-    /// </summary>
-    /// <param name="account">登入帳號。</param>
-    /// <param name="cancellationToken">取消權杖。</param>
-    /// <returns>使用者資料；找不到時為 <see langword="null"/>。</returns>
-    public Task<UserDomain?> GetByAccountAsync(string account, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        return Task.FromResult(usersByAccount.TryGetValue(account, out var user)
-            ? Clone(user)
-            : null);
-    }
-
-    /// <summary>
-    /// 從測試資料來源依使用者識別碼取得使用者資料。
-    /// </summary>
-    /// <param name="userId">使用者識別碼。</param>
-    /// <param name="cancellationToken">取消權杖。</param>
-    /// <returns>使用者資料；找不到時為 <see langword="null"/>。</returns>
-    public Task<UserDomain?> GetByIdAsync(long userId, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        return Task.FromResult(usersById.TryGetValue(userId, out var user)
-            ? Clone(user)
-            : null);
-    }
-
-    /// <summary>
-    /// 複製使用者資料，避免測試共用可變狀態。
-    /// </summary>
-    /// <param name="user">來源使用者。</param>
-    /// <returns>複製後的使用者。</returns>
-    private static UserDomain Clone(UserDomain user) => new()
-    {
-        UserId = user.UserId,
-        Account = user.Account,
-        DisplayName = user.DisplayName,
-        PasswordHash = user.PasswordHash,
-        IsActive = user.IsActive,
-        CreatedAt = user.CreatedAt
-    };
-}
 
 /// <summary>
 /// 依序回傳預先排入權杖的測試服務。
@@ -91,9 +25,9 @@ internal sealed class QueueTokenService : ITokenService
     /// <summary>
     /// 取得下一個預先排入的測試權杖。
     /// </summary>
-    /// <param name="user">使用者資料。</param>
+    /// <param name="service">服務身分資料。</param>
     /// <returns>測試權杖資料。</returns>
-    public TokenDomain GenerateToken(UserDomain user)
+    public TokenDomain GenerateToken(ServiceDomain service)
     {
         GenerateTokenCallCount++;
 
@@ -104,6 +38,20 @@ internal sealed class QueueTokenService : ITokenService
 
         return tokens.Dequeue();
     }
+}
+
+/// <summary>
+/// 測試用的固定 Entry 憑證驗證器。
+/// </summary>
+/// <param name="expectedCredential">可通過驗證的密文。</param>
+internal sealed class FixedEntryCredentialValidator(string expectedCredential) : IEntryCredentialValidator
+{
+    /// <inheritdoc />
+    public bool IsDevelopmentFixture => false;
+
+    /// <inheritdoc />
+    public bool IsValid(string? encryptedCredential) =>
+        string.Equals(encryptedCredential, expectedCredential, StringComparison.Ordinal);
 }
 
 /// <summary>
@@ -133,14 +81,7 @@ internal sealed class SpyRefreshTokenStore : IRefreshTokenStore
         tokens[refreshToken] = Clone(model);
     }
 
-    /// <summary>
-    /// 將 Refresh Token 寫入測試儲存區。
-    /// </summary>
-    /// <param name="refreshToken">Refresh Token。</param>
-    /// <param name="model">Refresh Token 資料。</param>
-    /// <param name="expiresIn">權杖有效時間。</param>
-    /// <param name="cancellationToken">取消權杖。</param>
-    /// <returns>儲存作業。</returns>
+    /// <inheritdoc />
     public Task SaveAsync(
         string refreshToken,
         RefreshTokenModel model,
@@ -148,18 +89,11 @@ internal sealed class SpyRefreshTokenStore : IRefreshTokenStore
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
         tokens[refreshToken] = Clone(model);
-
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// 從測試儲存區取得 Refresh Token 資料。
-    /// </summary>
-    /// <param name="refreshToken">Refresh Token。</param>
-    /// <param name="cancellationToken">取消權杖。</param>
-    /// <returns>Refresh Token 資料；找不到時為 <see langword="null"/>。</returns>
+    /// <inheritdoc />
     public Task<RefreshTokenModel?> GetAsync(
         string refreshToken,
         CancellationToken cancellationToken = default)
@@ -171,12 +105,7 @@ internal sealed class SpyRefreshTokenStore : IRefreshTokenStore
             : null);
     }
 
-    /// <summary>
-    /// 從測試儲存區取得並移除 Refresh Token。
-    /// </summary>
-    /// <param name="refreshToken">Refresh Token。</param>
-    /// <param name="cancellationToken">取消權杖。</param>
-    /// <returns>Refresh Token 資料；找不到時為 <see langword="null"/>。</returns>
+    /// <inheritdoc />
     public Task<RefreshTokenModel?> ConsumeAsync(
         string refreshToken,
         CancellationToken cancellationToken = default)
@@ -194,60 +123,23 @@ internal sealed class SpyRefreshTokenStore : IRefreshTokenStore
         return Task.FromResult<RefreshTokenModel?>(Clone(model));
     }
 
-    /// <summary>
-    /// 從測試儲存區移除 Refresh Token 並記錄移除清單。
-    /// </summary>
-    /// <param name="refreshToken">Refresh Token。</param>
-    /// <param name="cancellationToken">取消權杖。</param>
-    /// <returns>移除作業。</returns>
+    /// <inheritdoc />
     public Task RemoveAsync(
         string refreshToken,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
         RemovedTokens.Add(refreshToken);
         tokens.Remove(refreshToken);
-
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// 複製 Refresh Token 資料，避免測試共用可變狀態。
-    /// </summary>
-    /// <param name="model">來源 Refresh Token 資料。</param>
-    /// <returns>複製後的 Refresh Token 資料。</returns>
     private static RefreshTokenModel Clone(RefreshTokenModel model) => new()
     {
-        UserId = model.UserId,
-        Account = model.Account,
+        ServiceId = model.ServiceId,
+        ServiceName = model.ServiceName,
         CreatedAt = model.CreatedAt,
         ExpiresAt = model.ExpiresAt,
         IsRevoked = model.IsRevoked
     };
-}
-
-/// <summary>
-/// 建立測試用密碼雜湊。
-/// </summary>
-internal static class PasswordHashBuilder
-{
-    /// <summary>
-    /// 建立 PBKDF2-SHA256 密碼雜湊字串。
-    /// </summary>
-    /// <param name="password">原始密碼。</param>
-    /// <param name="iterations">雜湊迭代次數。</param>
-    /// <returns>密碼雜湊字串。</returns>
-    public static string CreatePbkdf2Sha256(string password, int iterations = 100_000)
-    {
-        var salt = RandomNumberGenerator.GetBytes(16);
-        var hash = Rfc2898DeriveBytes.Pbkdf2(
-            password,
-            salt,
-            iterations,
-            HashAlgorithmName.SHA256,
-            32);
-
-        return $"PBKDF2-SHA256:{iterations}:{Convert.ToBase64String(salt)}:{Convert.ToBase64String(hash)}";
-    }
 }

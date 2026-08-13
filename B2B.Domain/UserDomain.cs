@@ -1,7 +1,7 @@
 namespace B2B.Domain;
 
 /// <summary>
-/// 表示系統使用者的領域資料。
+/// 表示可由 Web API 查詢的系統使用者資料。
 /// </summary>
 public sealed class UserDomain
 {
@@ -21,7 +21,7 @@ public sealed class UserDomain
     public string DisplayName { get; set; } = string.Empty;
 
     /// <summary>
-    /// 取得或設定密碼雜湊值。
+    /// 取得或設定密碼雜湊值。此欄位不可由 Web API 回傳。
     /// </summary>
     public string PasswordHash { get; set; } = string.Empty;
 

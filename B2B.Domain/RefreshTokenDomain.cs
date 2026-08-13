@@ -11,9 +11,9 @@ public sealed class RefreshTokenDomain
     public long RefreshTokenId { get; set; }
 
     /// <summary>
-    /// 取得或設定權杖所屬的使用者識別碼。
+    /// 取得或設定權杖所屬的服務識別碼。
     /// </summary>
-    public long UserId { get; set; }
+    public string ServiceId { get; set; } = string.Empty;
 
     /// <summary>
     /// 取得或設定 Refresh Token 值。

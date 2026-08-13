@@ -156,13 +156,19 @@ flowchart TD
 
 注意：Oracle 連線字串不再放在 `ConnectionStrings`，而是由 `DataAccess:B2BConn` 交給 `B2B.Conn` 解析。
 
+## Entry.ini 登入憑證
+
+應用程式啟動時會從輸出／發佈根目錄讀取 `Entry.ini`。檔案內容必須是一行 `AES-GCM-V1:<Base64 payload>`；同一份檔案須部署於呼叫登入 API 的其他專案，並以 `encryptedCredential` 欄位原樣傳入。公開開發範例只允許 Development 環境使用，其他環境必須換成專屬密文。
+
 ## 對外 API
 
 | Method | Route | 說明 |
 | --- | --- | --- |
-| `POST` | `/api/auth/login` | 登入並取得 Access Token 與 Refresh Token |
+| `POST` | `/api/auth/login` | 使用 AES 加密 Entry 憑證登入並取得 Access Token 與 Refresh Token |
 | `POST` | `/api/auth/refresh-token` | 使用 Refresh Token 換發新的 Token |
 | `POST` | `/api/auth/logout` | 登出並撤銷 Refresh Token |
+| `GET` | `/api/users/{userId}` | 使用 Service JWT 依識別碼查詢 User |
+| `GET` | `/api/users/by-account/{account}` | 使用 Service JWT 依帳號查詢 User |
 | `GET` | `/health/live` | Liveness 檢查 |
 | `GET` | `/health/ready` | Readiness 檢查，包含 Oracle 連線 |
 

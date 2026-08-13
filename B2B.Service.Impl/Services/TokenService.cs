@@ -18,18 +18,18 @@ namespace B2B.Service.Impl.Services;
 public sealed class TokenService(IOptions<JwtOptions> options) : ITokenService
 {
     /// <summary>
-    /// 依使用者資料產生 JWT Access Token 與 Refresh Token。
+    /// 依服務身分產生 JWT Access Token 與 Refresh Token。
     /// </summary>
-    /// <param name="user">使用者資料。</param>
+    /// <param name="service">服務身分資料。</param>
     /// <returns>簽發的權杖資料。</returns>
-    public TokenDomain GenerateToken(UserDomain user)
+    public TokenDomain GenerateToken(ServiceDomain service)
     {
         var jwt = options.Value;
         var now = DateTime.UtcNow;
         var accessExpiresAt = now.AddMinutes(jwt.AccessTokenMinutes);
         var refreshExpiresAt = now.AddDays(jwt.RefreshTokenDays);
 
-        var accessToken = GenerateJwt(user.ToJwtClaims(), jwt.Audience, accessExpiresAt, now, jwt);
+        var accessToken = GenerateJwt(service.ToJwtClaims(), jwt.Audience, accessExpiresAt, now, jwt);
         var refreshToken = GenerateRefreshToken();
 
         return new TokenDomain

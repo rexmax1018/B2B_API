@@ -10,52 +10,48 @@ namespace B2B.Tests;
 public sealed class AuthServiceTests
 {
     /// <summary>
-    /// 驗證有效帳密會簽發權杖並儲存 Refresh Token。
+    /// 驗證相符的加密 Entry 憑證會簽發權杖並儲存 Refresh Token。
     /// </summary>
     [Fact]
-    public async Task LoginAsync_WithValidCredentials_ReturnsTokenAndStoresRefreshToken()
+    public async Task LoginAsync_WithMatchingEncryptedCredential_ReturnsTokenAndStoresRefreshToken()
     {
-        var repository = new FakeUserRepository();
-        var user = CreateActiveUser(password: "Valid-password-1");
-        repository.Add(user);
-
         var issuedToken = CreateToken("refresh-token-1");
         var tokenService = new QueueTokenService();
         tokenService.Enqueue(issuedToken);
         var refreshTokenStore = new SpyRefreshTokenStore();
-        var service = new AuthService(repository, tokenService, refreshTokenStore);
+        var service = new AuthService(
+            new FixedEntryCredentialValidator("matching-encrypted-credential"),
+            tokenService,
+            refreshTokenStore);
 
-        var result = await service.LoginAsync(user.Account, "Valid-password-1", CancellationToken.None);
+        var result = await service.LoginAsync("matching-encrypted-credential", CancellationToken.None);
 
         Assert.True(result.Success);
         Assert.Same(issuedToken, result.Token);
         Assert.Equal(1, tokenService.GenerateTokenCallCount);
         Assert.True(refreshTokenStore.SavedTokens.ContainsKey(issuedToken.RefreshToken));
-        Assert.Equal(user.UserId, refreshTokenStore.SavedTokens[issuedToken.RefreshToken].UserId);
+        Assert.Equal("entry-credential", refreshTokenStore.SavedTokens[issuedToken.RefreshToken].ServiceId);
     }
 
     /// <summary>
-    /// 驗證密碼錯誤時仍會暫時放行並簽發權杖。
+    /// 驗證不相符的加密 Entry 憑證不會簽發權杖。
     /// </summary>
     [Fact]
-    public async Task LoginAsync_WithInvalidPassword_ReturnsTokenTemporarily()
+    public async Task LoginAsync_WithUnrecognizedEncryptedCredential_ReturnsInvalidCredential()
     {
-        var repository = new FakeUserRepository();
-        var user = CreateActiveUser(password: "Valid-password-1");
-        repository.Add(user);
-
-        var issuedToken = CreateToken("refresh-token-2");
         var tokenService = new QueueTokenService();
-        tokenService.Enqueue(issuedToken);
         var refreshTokenStore = new SpyRefreshTokenStore();
-        var service = new AuthService(repository, tokenService, refreshTokenStore);
+        var service = new AuthService(
+            new FixedEntryCredentialValidator("matching-encrypted-credential"),
+            tokenService,
+            refreshTokenStore);
 
-        var result = await service.LoginAsync(user.Account, "wrong-password", CancellationToken.None);
+        var result = await service.LoginAsync("other-encrypted-credential", CancellationToken.None);
 
-        Assert.True(result.Success);
-        Assert.Same(issuedToken, result.Token);
-        Assert.Equal(1, tokenService.GenerateTokenCallCount);
-        Assert.True(refreshTokenStore.SavedTokens.ContainsKey(issuedToken.RefreshToken));
+        Assert.False(result.Success);
+        Assert.Equal("INVALID_ENTRY_CREDENTIAL", result.ErrorCode);
+        Assert.Equal(0, tokenService.GenerateTokenCallCount);
+        Assert.Empty(refreshTokenStore.SavedTokens);
     }
 
     /// <summary>
@@ -65,7 +61,7 @@ public sealed class AuthServiceTests
     public async Task RefreshTokenAsync_WhenTokenIsMissing_ReturnsInvalidRefreshToken()
     {
         var service = new AuthService(
-            new FakeUserRepository(),
+            new FixedEntryCredentialValidator("matching-encrypted-credential"),
             new QueueTokenService(),
             new SpyRefreshTokenStore());
 
@@ -84,15 +80,15 @@ public sealed class AuthServiceTests
         var refreshTokenStore = new SpyRefreshTokenStore();
         refreshTokenStore.Seed("expired-token", new RefreshTokenModel
         {
-            UserId = 1,
-            Account = "user1",
+            ServiceId = "entry-credential",
+            ServiceName = "Entry Credential",
             CreatedAt = DateTime.UtcNow.AddDays(-8),
             ExpiresAt = DateTime.UtcNow.AddMinutes(-1),
             IsRevoked = false
         });
 
         var service = new AuthService(
-            new FakeUserRepository(),
+            new FixedEntryCredentialValidator("matching-encrypted-credential"),
             new QueueTokenService(),
             refreshTokenStore);
 
@@ -113,15 +109,15 @@ public sealed class AuthServiceTests
         var refreshTokenStore = new SpyRefreshTokenStore();
         refreshTokenStore.Seed("revoked-token", new RefreshTokenModel
         {
-            UserId = 1,
-            Account = "user1",
+            ServiceId = "entry-credential",
+            ServiceName = "Entry Credential",
             CreatedAt = DateTime.UtcNow.AddDays(-1),
             ExpiresAt = DateTime.UtcNow.AddDays(1),
             IsRevoked = true
         });
 
         var service = new AuthService(
-            new FakeUserRepository(),
+            new FixedEntryCredentialValidator("matching-encrypted-credential"),
             new QueueTokenService(),
             refreshTokenStore);
 
@@ -138,15 +134,11 @@ public sealed class AuthServiceTests
     [Fact]
     public async Task RefreshTokenAsync_WithValidToken_RotatesRefreshToken()
     {
-        var repository = new FakeUserRepository();
-        var user = CreateActiveUser(password: "Valid-password-1");
-        repository.Add(user);
-
         var refreshTokenStore = new SpyRefreshTokenStore();
         refreshTokenStore.Seed("old-refresh-token", new RefreshTokenModel
         {
-            UserId = user.UserId,
-            Account = user.Account,
+            ServiceId = "entry-credential",
+            ServiceName = "Entry Credential",
             CreatedAt = DateTime.UtcNow.AddMinutes(-10),
             ExpiresAt = DateTime.UtcNow.AddDays(1),
             IsRevoked = false
@@ -155,7 +147,10 @@ public sealed class AuthServiceTests
         var newToken = CreateToken("new-refresh-token");
         var tokenService = new QueueTokenService();
         tokenService.Enqueue(newToken);
-        var service = new AuthService(repository, tokenService, refreshTokenStore);
+        var service = new AuthService(
+            new FixedEntryCredentialValidator("matching-encrypted-credential"),
+            tokenService,
+            refreshTokenStore);
 
         var result = await service.RefreshTokenAsync("old-refresh-token", CancellationToken.None);
 
@@ -165,21 +160,6 @@ public sealed class AuthServiceTests
         Assert.False(refreshTokenStore.SavedTokens.ContainsKey("old-refresh-token"));
         Assert.True(refreshTokenStore.SavedTokens.ContainsKey(newToken.RefreshToken));
     }
-
-    /// <summary>
-    /// 建立啟用狀態的測試使用者。
-    /// </summary>
-    /// <param name="password">原始密碼。</param>
-    /// <returns>測試使用者。</returns>
-    private static UserDomain CreateActiveUser(string password) => new()
-    {
-        UserId = 1,
-        Account = "user1",
-        DisplayName = "測試使用者",
-        PasswordHash = PasswordHashBuilder.CreatePbkdf2Sha256(password),
-        IsActive = true,
-        CreatedAt = DateTime.UtcNow
-    };
 
     /// <summary>
     /// 建立測試用權杖資料。

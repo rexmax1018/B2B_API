@@ -6,14 +6,14 @@ namespace B2B.Domain.Models;
 public class RefreshTokenModel
 {
     /// <summary>
-    /// 取得或設定權杖所屬的使用者識別碼。
+    /// 取得或設定權杖所屬的服務識別碼。
     /// </summary>
-    public long UserId { get; set; }
+    public string ServiceId { get; set; } = string.Empty;
 
     /// <summary>
-    /// 取得或設定權杖所屬的登入帳號。
+    /// 取得或設定權杖所屬的服務名稱。
     /// </summary>
-    public string Account { get; set; } = string.Empty;
+    public string ServiceName { get; set; } = string.Empty;
 
     /// <summary>
     /// 取得或設定權杖建立時間。

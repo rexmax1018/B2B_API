@@ -1,4 +1,3 @@
-using B2B.Dao.Repositories.Interfaces;
 using B2B.Domain;
 using B2B.Domain.Models;
 using B2B.Service.Interfaces;
@@ -6,13 +5,11 @@ using B2B.Service.Interfaces;
 namespace B2B.Service.Impl.Services;
 
 /// <summary>
-/// 提供帳號登入、權杖換發與登出服務。
+/// 提供服務登入、權杖換發與登出服務。
 /// </summary>
-/// <param name="userRepository">使用者資料來源。</param>
 /// <param name="tokenService">權杖簽發服務。</param>
 /// <param name="refreshTokenStore">Refresh Token 儲存服務。</param>
 public sealed class AuthService(
-    IUserRepository userRepository,
     ITokenService tokenService,
     IRefreshTokenStore refreshTokenStore) : IAuthService
 {
@@ -20,28 +17,23 @@ public sealed class AuthService(
     private const string RefreshTokenExpiredCode = "REFRESH_TOKEN_EXPIRED";
     private const string RefreshTokenRevokedCode = "REFRESH_TOKEN_REVOKED";
     private const string RefreshTokenInvalidMessage = "登入狀態已失效，請重新登入";
-    private const long TemporaryUserId = 0;
+    private const string AuthenticationNotConfiguredCode = "AUTHENTICATION_NOT_CONFIGURED";
 
     /// <summary>
-    /// 暫時略過登入帳號與密碼驗證，成功時簽發權杖並保存 Refresh Token。
+    /// 驗證應用程式憑證，成功時簽發權杖並保存 Refresh Token。
     /// </summary>
-    /// <param name="account">登入帳號。</param>
-    /// <param name="password">登入密碼。</param>
+    /// <param name="credential">呼叫端提供的憑證。</param>
     /// <param name="cancellationToken">取消權杖。</param>
     /// <returns>登入處理結果。</returns>
     public async Task<LoginResultDomain> LoginAsync(
-        string account,
-        string password,
+        string credential,
         CancellationToken cancellationToken)
     {
-        // TODO: 接回正式使用者驗證後，需恢復帳號狀態與密碼檢查。
-        var user = await userRepository.GetByAccountAsync(account, cancellationToken)
-            ?? CreateTemporaryUser(account, TemporaryUserId);
+        cancellationToken.ThrowIfCancellationRequested();
 
-        var token = tokenService.GenerateToken(user);
-        await SaveRefreshTokenAsync(user, token, cancellationToken);
-
-        return LoginResultDomain.Succeeded(user, token);
+        // TODO: 在此接回舊版驗證。驗證成功後建立已驗證的 ServiceDomain，並呼叫 IssueTokenAsync。
+        // return await IssueTokenAsync(authenticatedService, cancellationToken);
+        return LoginResultDomain.Failed("登入驗證尚未設定", AuthenticationNotConfiguredCode);
     }
 
     /// <summary>
@@ -71,19 +63,19 @@ public sealed class AuthService(
             return LoginResultDomain.Failed(RefreshTokenInvalidMessage, RefreshTokenRevokedCode);
         }
 
-        // TODO: 接回正式使用者驗證後，移除暫時使用者 fallback。
-        var user = await userRepository.GetByIdAsync(storedToken.UserId, cancellationToken)
-            ?? CreateTemporaryUser(storedToken.Account, storedToken.UserId);
-
-        if (user is null || !user.IsActive)
+        if (string.IsNullOrWhiteSpace(storedToken.ServiceId) ||
+            string.IsNullOrWhiteSpace(storedToken.ServiceName))
         {
             return LoginResultDomain.Failed(RefreshTokenInvalidMessage, InvalidRefreshTokenCode);
         }
 
-        var newToken = tokenService.GenerateToken(user);
-        await SaveRefreshTokenAsync(user, newToken, cancellationToken);
+        var service = new ServiceDomain
+        {
+            ServiceId = storedToken.ServiceId,
+            ServiceName = storedToken.ServiceName
+        };
 
-        return LoginResultDomain.Succeeded(user, newToken);
+        return await IssueTokenAsync(service, cancellationToken);
     }
 
     /// <summary>
@@ -100,14 +92,30 @@ public sealed class AuthService(
     }
 
     /// <summary>
+    /// 依已驗證的服務身分簽發 Token 並保存 Refresh Token。
+    /// </summary>
+    /// <param name="service">服務身分資料。</param>
+    /// <param name="cancellationToken">取消權杖。</param>
+    /// <returns>登入處理結果。</returns>
+    private async Task<LoginResultDomain> IssueTokenAsync(
+        ServiceDomain service,
+        CancellationToken cancellationToken)
+    {
+        var token = tokenService.GenerateToken(service);
+        await SaveRefreshTokenAsync(service, token, cancellationToken);
+
+        return LoginResultDomain.Succeeded(token);
+    }
+
+    /// <summary>
     /// 儲存新簽發的 Refresh Token。
     /// </summary>
-    /// <param name="user">使用者資料。</param>
+    /// <param name="service">服務身分資料。</param>
     /// <param name="token">權杖資料。</param>
     /// <param name="cancellationToken">取消權杖。</param>
     /// <returns>儲存作業。</returns>
     private Task SaveRefreshTokenAsync(
-        UserDomain user,
+        ServiceDomain service,
         TokenDomain token,
         CancellationToken cancellationToken)
     {
@@ -116,8 +124,8 @@ public sealed class AuthService(
 
         var model = new RefreshTokenModel
         {
-            UserId = user.UserId,
-            Account = user.Account,
+            ServiceId = service.ServiceId,
+            ServiceName = service.ServiceName,
             CreatedAt = now,
             ExpiresAt = token.RefreshTokenExpiresAt,
             IsRevoked = false
@@ -130,26 +138,4 @@ public sealed class AuthService(
             cancellationToken);
     }
 
-    /// <summary>
-    /// 建立暫時登入使用者。
-    /// </summary>
-    /// <param name="account">登入帳號。</param>
-    /// <param name="userId">使用者識別碼。</param>
-    /// <returns>暫時使用者資料。</returns>
-    private static UserDomain CreateTemporaryUser(string account, long userId)
-    {
-        var normalizedAccount = string.IsNullOrWhiteSpace(account)
-            ? "temporary-user"
-            : account;
-
-        return new UserDomain
-        {
-            UserId = userId,
-            Account = normalizedAccount,
-            DisplayName = normalizedAccount,
-            PasswordHash = string.Empty,
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow
-        };
-    }
 }
