@@ -47,7 +47,7 @@ B2B_API
 | `B2B.WebApi` | API 啟動、Controller、Middleware、Swagger、認證授權、Rate Limit、Health Check | HTTP API |
 | `B2B.WebApi.Model` | API DTO 與共用回應格式 | `ApiResponse<T>`、Login/Refresh Request |
 | `B2B.Service` | Service 介面與 Options | `IAuthService`、`ITokenService`、`JwtOptions` |
-| `B2B.Service.Impl` | 商業流程實作 | Entry Login、User Query、Refresh Token、JWT 產生 |
+| `B2B.Service.Impl` | 商業流程實作 | 登入驗證 TODO、User Query、Refresh Token、JWT 產生 |
 | `B2B.Domain` | Domain Model | Service Identity、User、Token、Login Result |
 | `B2B.Dao` | 資料存取 | `B2BDbContext`、`IUserRepository`、Oracle Repository |
 | `B2B.Conn` | 連線帳密解析 | `B2B_Conn.GetEntityInfo(...)` |
@@ -91,7 +91,7 @@ flowchart LR
 - `B2B.Service` 只定義介面與 Options，不依賴實作層。
 - `B2B.Service.Impl` 的 AuthService 只負責服務憑證與 Token；UserService 則依賴 `B2B.Dao` 提供查詢。
 - `B2B.Dao` 依賴 `B2B.Conn` 取得 Oracle 連線資訊，供 User 查詢與 readiness health check 使用。
-- `B2B.Conn` 不需要被 Entry 憑證認證流程直接呼叫。
+- `B2B.Conn` 不需要被服務憑證驗證流程直接呼叫。
 
 ## NuGet 相依關係
 
@@ -435,7 +435,7 @@ flowchart TD
     DbContext --> OracleDb
 ```
 
-Entry 憑證登入與 User 查詢是兩條獨立流程：JWT 簽發不讀取 User Repository；已驗證的服務可透過 `IUserService` 查詢使用者。`DataAccess:UseFakeRepositories` 可讓開發與測試使用記憶體 Repository，正式環境必須為 `false`。
+服務憑證登入與 User 查詢是兩條獨立流程：JWT 簽發不讀取 User Repository；已驗證的服務可透過 `IUserService` 查詢使用者。`DataAccess:UseFakeRepositories` 可讓開發與測試使用記憶體 Repository，正式環境必須為 `false`。
 
 ## 登入流程
 
@@ -444,24 +444,20 @@ sequenceDiagram
     participant Client as Client
     participant Controller as AuthController
     participant Auth as AuthService
-    participant Credential as EntryCredentialValidator
-    participant Entry as Entry.ini
     participant Token as TokenService
     participant Store as IRefreshTokenStore
 
-    Client->>Controller: POST /api/auth/login (encryptedCredential)
-    Controller->>Auth: LoginAsync(encryptedCredential)
-    Auth->>Credential: IsValid(encryptedCredential)
-    Credential->>Entry: 載入 AES-GCM 密文（啟動時）
-    Credential-->>Auth: 常數時間比對結果
-    Auth->>Token: 建立 Access Token 與 Refresh Token
+    Client->>Controller: POST /api/auth/login (credential)
+    Controller->>Auth: LoginAsync(credential)
+    Auth->>Auth: TODO：接回舊版憑證驗證
+    Auth->>Token: 驗證成功後建立 ServiceDomain 並簽發 Token
     Token-->>Auth: LoginResultDomain
     Auth->>Store: 儲存 Refresh Token
     Auth-->>Controller: 登入結果
     Controller-->>Client: ApiResponse LoginResponse
 ```
 
-登入請求只接受 `encryptedCredential`，即其他專案讀取其 `Entry.ini` 後原樣傳入的 AES-GCM 密文。比對成功後，JWT 會代表固定的 `entry-credential` 服務身分，而非資料庫使用者。
+登入請求目前使用 `credential` 欄位。`AuthService.LoginAsync` 已保留登入驗證 TODO，尚未自行建立或讀取固定憑證檔案；將舊版憑證驗證搬入後，驗證成功的服務身分應建立 `ServiceDomain`，再呼叫既有 Token 流程。JWT 代表服務身分，不代表資料庫使用者。
 
 ## User 查詢流程
 
@@ -500,17 +496,78 @@ sequenceDiagram
 
 Refresh Token 採用輪替機制。舊 Token 使用後會失效，並由服務產生新的 Token 組合。
 
-### Entry.ini 憑證
+## .NET Framework 4.8 手動遷移說明
 
-根目錄的 `Entry.ini` 必須只有一行 `AES-GCM-V1:<Base64 payload>`。建置與發佈時會將檔案複製至 Web API 的應用程式根目錄；其他專案必須部署相同檔案，並將整行內容放入登入請求：
+本方案的遷移目標是保留原本的分層呼叫方式，只將 .NET Framework 4.8 的商業邏輯接回目前的 .NET 專案。`B2B.Dao` 的 `DbContext`、Entity 與 Repository 已建立，手動遷移時不要重建或修改 DAO；先完成 `B2B.Service`、`B2B.Service.Impl`，再接 API。
+
+### 遷移前原則
+
+- DAO 不動：保留 `IUserRepository`、`UserRepository`、`B2BDbContext` 與既有 Entity 對應。
+- Service 不回傳 Web API DTO：Service 回傳 `UserDomain` 或 `LoginResultDomain`，DTO 只在 WebApi 層處理。
+- JWT 與 User 查詢分離：JWT 登入只驗證服務憑證並建立服務身分；User API 使用已驗證的 Service JWT 查詢資料庫使用者。
+- 憑證檔案／加密內容的實際驗證放入 `AuthService.LoginAsync` 的 TODO；不要在 Controller 或 DAO 直接驗證或簽發 Token。
+- `ServiceDomain` 必須保留，因為 JWT Claims 與 Refresh Token 都需要服務身分資料。
+
+### 路線一：DAO → Service → WebApi
+
+依下列順序搬移 .NET Framework 4.8 的 User 商業邏輯：
+
+1. 確認 `IUserRepository` 的兩個方法與舊版查詢條件一致。DAO 已完成時，只比對輸入、輸出與例外行為，不改 DAO 程式。
+2. 在 [`UserService.cs`](B2B.Service.Impl/Services/UserService.cs) 的 `GetByAccountAsync` 與 `GetByIdAsync` 中，保留 Repository 呼叫，將啟用狀態、權限、資料清理等舊版規則接在 `TODO[MIGRATE-DAO]` 與 `TODO[MIGRATE-SERVICE]` 位置。
+3. Service 只回傳 `UserDomain?`；找不到資料時回傳 `null`，不要在 Service 建立 `UserResponse`。
+4. 在 [`UsersController.cs`](B2B.WebApi/Controllers/UsersController.cs) 的 `TODO[MIGRATE-CONTROLLER]` 補上舊版輸入格式、權限與路由規則，但查詢仍只透過 `IUserService`。
+5. 在 [`UserResponseMapping.cs`](B2B.WebApi/Mappings/UserResponseMapping.cs) 的 `TODO[MIGRATE-RESPONSE]` 補上公開欄位映射；依 `TODO[MIGRATE-SECURITY]` 確認 `PasswordHash` 或其他敏感欄位永不輸出。
+
+完成後的執行路徑應保持：
+
+```text
+UsersController
+    → IUserService
+        → UserService
+            → IUserRepository
+                → B2BDbContext / Entity / Oracle
+```
+
+### 路線二：憑證驗證 → JWT
+
+1. 在 [`AuthService.cs`](B2B.Service.Impl/Services/AuthService.cs) 的 `LoginAsync` TODO 接回舊版憑證檔案、加密內容解析與比對。`credential` 是呼叫端傳入的完整憑證內容，不要在 Controller 讀檔或直接簽 Token。
+2. 驗證成功後建立已驗證的 `ServiceDomain`，再呼叫同一個 Service 內的 `IssueTokenAsync`。不要以 `UserDomain` 代替服務身分，也不要查詢 User Repository 來完成登入。
+3. `IssueTokenAsync` 會透過 `ITokenService` 產生 Access Token，並透過 `IRefreshTokenStore` 保存 Refresh Token；Refresh Token 與 Logout 流程維持現有實作。
+4. [`AuthController.cs`](B2B.WebApi/Controllers/AuthController.cs) 只負責接收 `LoginRequest.Credential`、呼叫 `IAuthService` 與轉換回應。舊版額外回應欄位請依 Controller 中的 TODO 接回。
+5. 驗證尚未搬入前，登入會回傳 `AUTHENTICATION_NOT_CONFIGURED`；這是目前刻意保留的安全停靠狀態，不代表 JWT 服務流程需要改寫。
+
+登入請求格式：
 
 ```json
 {
-  "encryptedCredential": "<Entry.ini 的完整內容>"
+  "credential": "<舊版驗證所需的加密憑證內容>"
 }
 ```
 
-版控中的值是公開 AES-GCM 開發範例。Production 或 Staging 等非 Development 環境會拒絕這個範例，部署前必須以專屬的 AES-GCM 密文取代。密文本身是可重放的共享憑證，僅能經由 HTTPS 傳送，且不應寫入日誌、原始碼或版本控制。
+實際憑證檔案的路徑、AES 金鑰管理與部署方式由離線環境提供；不要將真實密文、金鑰或密碼提交到 Git，也不要寫入交易 Log。
+
+### TODO 對照表
+
+| 標記 | 位置 | 搬移內容 |
+| --- | --- | --- |
+| `TODO[MIGRATE-DAO]` | `UserService` | 舊版 DAO 查詢條件與資料存取差異 |
+| `TODO[MIGRATE-SERVICE]` | `UserService` | 啟用狀態、權限與其他商業規則 |
+| `TODO[MIGRATE-CONTROLLER]` | `UsersController` | 輸入格式、權限與 HTTP 行為 |
+| `TODO[MIGRATE-RESPONSE]` | `UsersController` / `UserResponseMapping` | 舊版 API 公開欄位映射 |
+| `TODO[MIGRATE-SECURITY]` | `UserResponseMapping` | 敏感欄位排除檢查 |
+| `TODO` | `AuthService` / `AuthController` | 舊版憑證驗證與登入回應欄位 |
+
+### 每次手動搬移後的檢查
+
+```powershell
+dotnet build B2B_API.sln --no-restore
+dotnet test B2B_API.sln --no-restore --verbosity minimal
+rg -n "TODO(\[MIGRATE-[A-Z-]+\])?" B2B.Service B2B.Service.Impl B2B.WebApi
+git diff --check
+git diff --name-only -- B2B.Dao
+```
+
+最後一個指令應沒有輸出；若 DAO 出現差異，先停止搬移並確認是否誤改資料存取層。完成 User Service 與 Auth Service 的邏輯接回後，再進行 WebApi 的實際 Oracle、JWT 與端到端驗證。
 
 ## 登出流程
 
