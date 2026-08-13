@@ -20,10 +20,6 @@ public sealed class B2BServiceModule : Autofac.Module
             .As<IAuthService>()
             .InstancePerLifetimeScope();
 
-        builder.RegisterType<EntryCredentialValidator>()
-            .As<IEntryCredentialValidator>()
-            .SingleInstance();
-
         builder.RegisterType<UserService>()
             .As<IUserService>()
             .InstancePerLifetimeScope();

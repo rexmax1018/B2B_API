@@ -1,7 +1,7 @@
 namespace B2B.Domain;
 
 /// <summary>
-/// 表示以 Entry 憑證驗證的服務身分。
+/// 表示可用於簽發 JWT 的服務身分。
 /// </summary>
 public sealed class ServiceDomain
 {

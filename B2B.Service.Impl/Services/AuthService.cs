@@ -5,13 +5,11 @@ using B2B.Service.Interfaces;
 namespace B2B.Service.Impl.Services;
 
 /// <summary>
-/// 提供服務憑證登入、權杖換發與登出服務。
+/// 提供服務登入、權杖換發與登出服務。
 /// </summary>
-/// <param name="userRepository">使用者資料來源。</param>
 /// <param name="tokenService">權杖簽發服務。</param>
 /// <param name="refreshTokenStore">Refresh Token 儲存服務。</param>
 public sealed class AuthService(
-    IEntryCredentialValidator entryCredentialValidator,
     ITokenService tokenService,
     IRefreshTokenStore refreshTokenStore) : IAuthService
 {
@@ -19,31 +17,23 @@ public sealed class AuthService(
     private const string RefreshTokenExpiredCode = "REFRESH_TOKEN_EXPIRED";
     private const string RefreshTokenRevokedCode = "REFRESH_TOKEN_REVOKED";
     private const string RefreshTokenInvalidMessage = "登入狀態已失效，請重新登入";
-    private const string EntryCredentialServiceId = "entry-credential";
-    private const string EntryCredentialServiceName = "Entry Credential";
+    private const string AuthenticationNotConfiguredCode = "AUTHENTICATION_NOT_CONFIGURED";
 
     /// <summary>
-    /// 驗證 AES 加密 Entry 憑證，成功時簽發權杖並保存 Refresh Token。
+    /// 驗證應用程式憑證，成功時簽發權杖並保存 Refresh Token。
     /// </summary>
-    /// <param name="encryptedCredential">其他專案傳入的 AES 加密 Entry 憑證。</param>
+    /// <param name="credential">呼叫端提供的憑證。</param>
     /// <param name="cancellationToken">取消權杖。</param>
     /// <returns>登入處理結果。</returns>
     public async Task<LoginResultDomain> LoginAsync(
-        string encryptedCredential,
+        string credential,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!entryCredentialValidator.IsValid(encryptedCredential))
-        {
-            return LoginResultDomain.Failed("憑證驗證失敗", "INVALID_ENTRY_CREDENTIAL");
-        }
-
-        var service = CreateEntryCredentialService();
-        var token = tokenService.GenerateToken(service);
-        await SaveRefreshTokenAsync(service, token, cancellationToken);
-
-        return LoginResultDomain.Succeeded(token);
+        // TODO: 在此接回舊版驗證。驗證成功後建立已驗證的 ServiceDomain，並呼叫 IssueTokenAsync。
+        // return await IssueTokenAsync(authenticatedService, cancellationToken);
+        return LoginResultDomain.Failed("登入驗證尚未設定", AuthenticationNotConfiguredCode);
     }
 
     /// <summary>
@@ -73,12 +63,19 @@ public sealed class AuthService(
             return LoginResultDomain.Failed(RefreshTokenInvalidMessage, RefreshTokenRevokedCode);
         }
 
-        var service = CreateEntryCredentialService();
+        if (string.IsNullOrWhiteSpace(storedToken.ServiceId) ||
+            string.IsNullOrWhiteSpace(storedToken.ServiceName))
+        {
+            return LoginResultDomain.Failed(RefreshTokenInvalidMessage, InvalidRefreshTokenCode);
+        }
 
-        var newToken = tokenService.GenerateToken(service);
-        await SaveRefreshTokenAsync(service, newToken, cancellationToken);
+        var service = new ServiceDomain
+        {
+            ServiceId = storedToken.ServiceId,
+            ServiceName = storedToken.ServiceName
+        };
 
-        return LoginResultDomain.Succeeded(newToken);
+        return await IssueTokenAsync(service, cancellationToken);
     }
 
     /// <summary>
@@ -92,6 +89,22 @@ public sealed class AuthService(
         CancellationToken cancellationToken)
     {
         return refreshTokenStore.RemoveAsync(refreshToken, cancellationToken);
+    }
+
+    /// <summary>
+    /// 依已驗證的服務身分簽發 Token 並保存 Refresh Token。
+    /// </summary>
+    /// <param name="service">服務身分資料。</param>
+    /// <param name="cancellationToken">取消權杖。</param>
+    /// <returns>登入處理結果。</returns>
+    private async Task<LoginResultDomain> IssueTokenAsync(
+        ServiceDomain service,
+        CancellationToken cancellationToken)
+    {
+        var token = tokenService.GenerateToken(service);
+        await SaveRefreshTokenAsync(service, token, cancellationToken);
+
+        return LoginResultDomain.Succeeded(token);
     }
 
     /// <summary>
@@ -125,16 +138,4 @@ public sealed class AuthService(
             cancellationToken);
     }
 
-    /// <summary>
-    /// 建立 Entry 憑證代表的服務身分。
-    /// </summary>
-    /// <returns>服務身分資料。</returns>
-    private static ServiceDomain CreateEntryCredentialService()
-    {
-        return new ServiceDomain
-        {
-            ServiceId = EntryCredentialServiceId,
-            ServiceName = EntryCredentialServiceName
-        };
-    }
 }
