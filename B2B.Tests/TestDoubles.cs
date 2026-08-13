@@ -41,20 +41,6 @@ internal sealed class QueueTokenService : ITokenService
 }
 
 /// <summary>
-/// 測試用的固定 Entry 憑證驗證器。
-/// </summary>
-/// <param name="expectedCredential">可通過驗證的密文。</param>
-internal sealed class FixedEntryCredentialValidator(string expectedCredential) : IEntryCredentialValidator
-{
-    /// <inheritdoc />
-    public bool IsDevelopmentFixture => false;
-
-    /// <inheritdoc />
-    public bool IsValid(string? encryptedCredential) =>
-        string.Equals(encryptedCredential, expectedCredential, StringComparison.Ordinal);
-}
-
-/// <summary>
 /// 可觀察儲存與移除結果的 Refresh Token 測試儲存區。
 /// </summary>
 internal sealed class SpyRefreshTokenStore : IRefreshTokenStore

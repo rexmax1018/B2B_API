@@ -11,10 +11,22 @@ namespace B2B.Service.Impl.Services;
 public sealed class UserService(IUserRepository userRepository) : IUserService
 {
     /// <inheritdoc />
-    public Task<UserDomain?> GetByAccountAsync(string account, CancellationToken cancellationToken) =>
-        userRepository.GetByAccountAsync(account, cancellationToken);
+    public async Task<UserDomain?> GetByAccountAsync(string account, CancellationToken cancellationToken)
+    {
+        // TODO[MIGRATE-DAO]: 保留此 IUserRepository 呼叫，將 .NET Framework 4.8 的帳號查詢規則接在回傳結果之後。
+        var user = await userRepository.GetByAccountAsync(account, cancellationToken);
+
+        // TODO[MIGRATE-SERVICE]: 搬入舊版帳號查詢的啟用狀態、權限或其他商業規則；不要在此層回傳 WebApi DTO。
+        return user;
+    }
 
     /// <inheritdoc />
-    public Task<UserDomain?> GetByIdAsync(long userId, CancellationToken cancellationToken) =>
-        userRepository.GetByIdAsync(userId, cancellationToken);
+    public async Task<UserDomain?> GetByIdAsync(long userId, CancellationToken cancellationToken)
+    {
+        // TODO[MIGRATE-DAO]: 保留此 IUserRepository 呼叫，將 .NET Framework 4.8 的識別碼查詢規則接在回傳結果之後。
+        var user = await userRepository.GetByIdAsync(userId, cancellationToken);
+
+        // TODO[MIGRATE-SERVICE]: 搬入舊版識別碼查詢的啟用狀態、權限或其他商業規則；不要在此層回傳 WebApi DTO。
+        return user;
+    }
 }

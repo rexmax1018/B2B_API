@@ -10,46 +10,19 @@ namespace B2B.Tests;
 public sealed class AuthServiceTests
 {
     /// <summary>
-    /// 驗證相符的加密 Entry 憑證會簽發權杖並儲存 Refresh Token。
+    /// 驗證舊版登入驗證尚未接回時不會簽發權杖。
     /// </summary>
     [Fact]
-    public async Task LoginAsync_WithMatchingEncryptedCredential_ReturnsTokenAndStoresRefreshToken()
-    {
-        var issuedToken = CreateToken("refresh-token-1");
-        var tokenService = new QueueTokenService();
-        tokenService.Enqueue(issuedToken);
-        var refreshTokenStore = new SpyRefreshTokenStore();
-        var service = new AuthService(
-            new FixedEntryCredentialValidator("matching-encrypted-credential"),
-            tokenService,
-            refreshTokenStore);
-
-        var result = await service.LoginAsync("matching-encrypted-credential", CancellationToken.None);
-
-        Assert.True(result.Success);
-        Assert.Same(issuedToken, result.Token);
-        Assert.Equal(1, tokenService.GenerateTokenCallCount);
-        Assert.True(refreshTokenStore.SavedTokens.ContainsKey(issuedToken.RefreshToken));
-        Assert.Equal("entry-credential", refreshTokenStore.SavedTokens[issuedToken.RefreshToken].ServiceId);
-    }
-
-    /// <summary>
-    /// 驗證不相符的加密 Entry 憑證不會簽發權杖。
-    /// </summary>
-    [Fact]
-    public async Task LoginAsync_WithUnrecognizedEncryptedCredential_ReturnsInvalidCredential()
+    public async Task LoginAsync_WhenCredentialValidationIsNotMigrated_ReturnsNotConfigured()
     {
         var tokenService = new QueueTokenService();
         var refreshTokenStore = new SpyRefreshTokenStore();
-        var service = new AuthService(
-            new FixedEntryCredentialValidator("matching-encrypted-credential"),
-            tokenService,
-            refreshTokenStore);
+        var service = new AuthService(tokenService, refreshTokenStore);
 
-        var result = await service.LoginAsync("other-encrypted-credential", CancellationToken.None);
+        var result = await service.LoginAsync("credential", CancellationToken.None);
 
         Assert.False(result.Success);
-        Assert.Equal("INVALID_ENTRY_CREDENTIAL", result.ErrorCode);
+        Assert.Equal("AUTHENTICATION_NOT_CONFIGURED", result.ErrorCode);
         Assert.Equal(0, tokenService.GenerateTokenCallCount);
         Assert.Empty(refreshTokenStore.SavedTokens);
     }
@@ -60,10 +33,7 @@ public sealed class AuthServiceTests
     [Fact]
     public async Task RefreshTokenAsync_WhenTokenIsMissing_ReturnsInvalidRefreshToken()
     {
-        var service = new AuthService(
-            new FixedEntryCredentialValidator("matching-encrypted-credential"),
-            new QueueTokenService(),
-            new SpyRefreshTokenStore());
+        var service = new AuthService(new QueueTokenService(), new SpyRefreshTokenStore());
 
         var result = await service.RefreshTokenAsync("missing-token", CancellationToken.None);
 
@@ -80,17 +50,14 @@ public sealed class AuthServiceTests
         var refreshTokenStore = new SpyRefreshTokenStore();
         refreshTokenStore.Seed("expired-token", new RefreshTokenModel
         {
-            ServiceId = "entry-credential",
-            ServiceName = "Entry Credential",
+            ServiceId = "service-1",
+            ServiceName = "測試服務",
             CreatedAt = DateTime.UtcNow.AddDays(-8),
             ExpiresAt = DateTime.UtcNow.AddMinutes(-1),
             IsRevoked = false
         });
 
-        var service = new AuthService(
-            new FixedEntryCredentialValidator("matching-encrypted-credential"),
-            new QueueTokenService(),
-            refreshTokenStore);
+        var service = new AuthService(new QueueTokenService(), refreshTokenStore);
 
         var result = await service.RefreshTokenAsync("expired-token", CancellationToken.None);
 
@@ -109,17 +76,14 @@ public sealed class AuthServiceTests
         var refreshTokenStore = new SpyRefreshTokenStore();
         refreshTokenStore.Seed("revoked-token", new RefreshTokenModel
         {
-            ServiceId = "entry-credential",
-            ServiceName = "Entry Credential",
+            ServiceId = "service-1",
+            ServiceName = "測試服務",
             CreatedAt = DateTime.UtcNow.AddDays(-1),
             ExpiresAt = DateTime.UtcNow.AddDays(1),
             IsRevoked = true
         });
 
-        var service = new AuthService(
-            new FixedEntryCredentialValidator("matching-encrypted-credential"),
-            new QueueTokenService(),
-            refreshTokenStore);
+        var service = new AuthService(new QueueTokenService(), refreshTokenStore);
 
         var result = await service.RefreshTokenAsync("revoked-token", CancellationToken.None);
 
@@ -137,8 +101,8 @@ public sealed class AuthServiceTests
         var refreshTokenStore = new SpyRefreshTokenStore();
         refreshTokenStore.Seed("old-refresh-token", new RefreshTokenModel
         {
-            ServiceId = "entry-credential",
-            ServiceName = "Entry Credential",
+            ServiceId = "service-1",
+            ServiceName = "測試服務",
             CreatedAt = DateTime.UtcNow.AddMinutes(-10),
             ExpiresAt = DateTime.UtcNow.AddDays(1),
             IsRevoked = false
@@ -147,10 +111,7 @@ public sealed class AuthServiceTests
         var newToken = CreateToken("new-refresh-token");
         var tokenService = new QueueTokenService();
         tokenService.Enqueue(newToken);
-        var service = new AuthService(
-            new FixedEntryCredentialValidator("matching-encrypted-credential"),
-            tokenService,
-            refreshTokenStore);
+        var service = new AuthService(tokenService, refreshTokenStore);
 
         var result = await service.RefreshTokenAsync("old-refresh-token", CancellationToken.None);
 
@@ -161,11 +122,6 @@ public sealed class AuthServiceTests
         Assert.True(refreshTokenStore.SavedTokens.ContainsKey(newToken.RefreshToken));
     }
 
-    /// <summary>
-    /// 建立測試用權杖資料。
-    /// </summary>
-    /// <param name="refreshToken">Refresh Token。</param>
-    /// <returns>權杖資料。</returns>
     private static TokenDomain CreateToken(string refreshToken) => new()
     {
         AccessToken = $"access-{refreshToken}",

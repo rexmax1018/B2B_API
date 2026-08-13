@@ -19,7 +19,7 @@ namespace B2B.WebApi.Controllers;
 public sealed class AuthController(IAuthService authService) : ControllerBase
 {
     /// <summary>
-    /// 驗證 AES 加密 Entry 憑證並取得權杖。
+    /// 驗證應用程式憑證並取得權杖。
     /// </summary>
     /// <param name="request">登入請求。</param>
     /// <param name="cancellationToken">取消權杖。</param>
@@ -31,17 +31,17 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         [FromBody] LoginRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await authService.LoginAsync(
-            request.EncryptedCredential,
-            cancellationToken);
+        var result = await authService.LoginAsync(request.Credential, cancellationToken);
 
         if (!result.Success || result.Token is null)
         {
+            var message = result.Message ?? "登入失敗";
             return Unauthorized(ApiResponse<LoginResponse>.Fail(
-                result.Message ?? "登入失敗",
-                new ErrorResponse(result.ErrorCode ?? "INVALID_ENTRY_CREDENTIAL", result.Message ?? "登入失敗")));
+                message,
+                new ErrorResponse(result.ErrorCode ?? "AUTH_FAILED", message)));
         }
 
+        // TODO: 若舊版登入回應包含額外欄位，於 AuthResponseMapping 接回。
         return Ok(ApiResponse<LoginResponse>.Ok(result.Token.ToLoginResponse()));
     }
 
@@ -58,19 +58,17 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         [FromBody] RefreshTokenRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await authService.RefreshTokenAsync(
-            request.RefreshToken,
-            cancellationToken);
+        var result = await authService.RefreshTokenAsync(request.RefreshToken, cancellationToken);
 
         if (!result.Success || result.Token is null)
         {
             var message = result.Message ?? "更新權杖失敗";
-
             return Unauthorized(ApiResponse<RefreshTokenResponse>.Fail(
                 message,
                 new ErrorResponse(result.ErrorCode ?? "INVALID_REFRESH_TOKEN", message)));
         }
 
+        // TODO: 若舊版換發回應包含額外欄位，於 AuthResponseMapping 接回。
         return Ok(ApiResponse<RefreshTokenResponse>.Ok(result.Token.ToRefreshTokenResponse()));
     }
 
@@ -86,10 +84,9 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         [FromBody] LogoutRequest request,
         CancellationToken cancellationToken)
     {
-        await authService.LogoutAsync(
-            request.RefreshToken,
-            cancellationToken);
+        await authService.LogoutAsync(request.RefreshToken, cancellationToken);
 
+        // TODO: 若舊版登出回應包含額外資訊，於此接回。
         return Ok(ApiResponse<object?>.Ok(null, "登出成功"));
     }
 }
