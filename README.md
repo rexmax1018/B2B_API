@@ -1,443 +1,294 @@
 # B2B API
 
-B2B API 是以 ASP.NET Core Web API 為入口、Autofac Module 為模組組裝方式的分層專案。  
-目前 Oracle 連線字串不再由 `appsettings.json` 提供，而是由 `B2B.Conn` 依照環境、主機、資料庫與帳號類型解析後，再交由 `B2B.Dao` 建立資料存取設定。
-
-## 專案結構總覽
-
-```mermaid
-flowchart TB
-    Solution["B2B_API.sln"]
-    WebApi["B2B.WebApi<br/>HTTP API 入口與 Middleware"]
-    WebApiModel["B2B.WebApi.Model<br/>Request / Response DTO"]
-    Service["B2B.Service<br/>服務介面與 Options"]
-    ServiceImpl["B2B.Service.Impl<br/>服務實作與 Token 流程"]
-    Domain["B2B.Domain<br/>Domain Model"]
-    Dao["B2B.Dao<br/>Repository / EF Core / Oracle"]
-    Conn["B2B.Conn<br/>連線資訊解析與解密"]
-    Tests["B2B.Tests<br/>整合與單元測試"]
-
-    Solution --> WebApi
-    Solution --> WebApiModel
-    Solution --> Service
-    Solution --> ServiceImpl
-    Solution --> Domain
-    Solution --> Dao
-    Solution --> Conn
-    Solution --> Tests
-```
+目前方案是以 .NET 10.0 建置的 ASP.NET Core Web API。方案保留原本的分層路徑，讓 .NET Framework 4.8 的商業邏輯可以依照既有邊界逐段搬移：
 
 ```text
-B2B_API
-├─ B2B.WebApi              API Host、Controller、Middleware、Swagger、驗證與安全設定
-├─ B2B.WebApi.Model        API 請求與回應模型
-├─ B2B.Service             Service 介面、Options 與跨層抽象
-├─ B2B.Service.Impl        Auth / User Query / Token Service 實作
-├─ B2B.Domain              Domain Model 與領域資料結構
-├─ B2B.Dao                 DbContext、User Repository、DAO Module
-├─ B2B.Conn                AWS 離線環境連線資訊解析、INI 讀取、解密
-├─ B2B.Tests               測試專案
-└─ resources/B2B_Conn      B2B.Conn 還原參考截圖
+WebApi → Service → DAO → Oracle
 ```
 
-## 專案職責
+目前 DAO 的 `DbContext`、Entity、Mapping 與 Repository 已存在；User 查詢的 Service/WebApi 路徑已接通。登入憑證驗證仍保留在 `AuthService.LoginAsync` 的 TODO，驗證完成後才接回既有 JWT 簽發流程。
 
-| 專案 | 職責 | 主要輸出 |
-| --- | --- | --- |
-| `B2B.WebApi` | API 啟動、Controller、Middleware、Swagger、認證授權、Rate Limit、Health Check | HTTP API |
-| `B2B.WebApi.Model` | API DTO 與共用回應格式 | `ApiResponse<T>`、Login/Refresh Request |
-| `B2B.Service` | Service 介面與 Options | `IAuthService`、`ITokenService`、`JwtOptions` |
-| `B2B.Service.Impl` | 商業流程實作 | 登入驗證 TODO、User Query、Refresh Token、JWT 產生 |
-| `B2B.Domain` | Domain Model | Service Identity、User、Token、Login Result |
-| `B2B.Dao` | 資料存取 | `B2BDbContext`、`IUserRepository`、Oracle Repository |
-| `B2B.Conn` | 連線帳密解析 | `B2B_Conn.GetEntityInfo(...)` |
-| `B2B.Tests` | 測試與 WebApi Factory | 測試用 Host 與設定覆寫 |
+## 方案與版本
 
-## 專案相依關係
+| 項目 | 現況 |
+| --- | --- |
+| 方案 | `B2B_API.sln` |
+| Target Framework | 所有 `.csproj` 為 `net10.0` |
+| Web API | `B2B.WebApi` |
+| 測試 | `B2B.Tests`、xUnit |
+| Solution Explorer | 根目錄 `README.md` 由 `B2B_API.sln` 的 `Solution Items` 顯示 |
+| 版本控制 | 僅保留根目錄 README；專案資料夾內沒有 README |
+
+## 目前版控檔案樹
+
+以下是目前 Git 追蹤的方案與專案檔案。`bin`、`obj`、`.vs` 等建置或 IDE 產物不屬於版控內容。
+
+```text
+B2B_API/
+├── .gitattributes
+├── .gitignore
+├── B2B_API.sln
+├── README.md
+├── B2B.Conn/
+│   ├── B2B.Conn.csproj
+│   ├── B2B_Conn.cs
+│   ├── Configuration/
+│   │   ├── ConnectionProfileProvider.cs
+│   │   ├── DefaultConnectionProfiles.cs
+│   │   └── TextNormalizer.cs
+│   ├── Credentials/
+│   │   ├── CredentialResolutionService.cs
+│   │   ├── CredentialTextParser.cs
+│   │   ├── IniCredentialStore.cs
+│   │   ├── MonthCredentialSelector.cs
+│   │   ├── OracleConnectionStringFormatter.cs
+│   │   └── PasswordFormatter.cs
+│   ├── Cryptography/
+│   │   ├── AesStringProtector.cs
+│   │   ├── KeySetProvider.cs
+│   │   ├── RsaPrivateKeyDecryptor.cs
+│   │   ├── Sha512Hasher.cs
+│   │   ├── StringExtension.cs
+│   │   └── SymmetricKeyProvider.cs
+│   ├── Models/
+│   │   ├── B2B_Connection.cs
+│   │   ├── Entity_Connection.cs
+│   │   ├── KeySetInfo.cs
+│   │   ├── RsaKeyModel.cs
+│   │   └── SymmetricKeyModel.cs
+│   ├── Modules/B2BConnModule.cs
+│   └── Options/B2BConnOptions.cs
+├── B2B.Dao/
+│   ├── B2B.Dao.csproj
+│   ├── Contexts/B2BDbContext.cs
+│   ├── Entities/UserEntity.cs
+│   ├── Mappings/
+│   │   ├── UserEntityMapping.cs
+│   │   └── UserEntityMappingExtensions.cs
+│   ├── Modules/
+│   │   ├── B2BDaoModule.cs
+│   │   └── B2BDaoOptions.cs
+│   └── Repositories/
+│       ├── Implements/
+│       │   ├── InMemoryUserRepository.cs
+│       │   └── UserRepository.cs
+│       └── Interfaces/IUserRepository.cs
+├── B2B.Domain/
+│   ├── B2B.Domain.csproj
+│   ├── LoginResultDomain.cs
+│   ├── RefreshTokenDomain.cs
+│   ├── ServiceDomain.cs
+│   ├── TokenDomain.cs
+│   ├── UserDomain.cs
+│   └── Models/RefreshTokenModel.cs
+├── B2B.Service/
+│   ├── B2B.Service.csproj
+│   ├── IAuthService.cs
+│   ├── ITokenService.cs
+│   ├── IUserService.cs
+│   ├── Interfaces/IRefreshTokenStore.cs
+│   └── Options/JwtOptions.cs
+├── B2B.Service.Impl/
+│   ├── B2B.Service.Impl.csproj
+│   ├── Mappings/ServiceJwtClaimsExtensions.cs
+│   ├── Modules/B2BServiceModule.cs
+│   ├── Services/
+│   │   ├── AuthService.cs
+│   │   ├── TokenService.cs
+│   │   └── UserService.cs
+│   └── Stores/MemoryRefreshTokenStore.cs
+├── B2B.WebApi.Model/
+│   ├── B2B.WebApi.Model.csproj
+│   ├── Auth/
+│   │   ├── LoginRequest.cs
+│   │   ├── LoginResponse.cs
+│   │   ├── LogoutRequest.cs
+│   │   ├── RefreshTokenRequest.cs
+│   │   └── RefreshTokenResponse.cs
+│   ├── Common/
+│   │   ├── ApiResponse.cs
+│   │   └── ErrorResponse.cs
+│   └── User/UserResponse.cs
+├── B2B.WebApi/
+│   ├── B2B.WebApi.csproj
+│   ├── B2B.WebApi.http
+│   ├── Program.cs
+│   ├── appsettings.json
+│   ├── appsettings.Development.json
+│   ├── appsettings.Production.json
+│   ├── nlog.config
+│   ├── Controllers/
+│   │   ├── AuthController.cs
+│   │   ├── HealthController.cs
+│   │   └── UsersController.cs
+│   ├── Extensions/
+│   │   ├── ApplicationBuilderExtensions.cs
+│   │   ├── AuthenticationExtensions.cs
+│   │   ├── NLogExtensions.cs
+│   │   ├── SecurityConfigurationValidator.cs
+│   │   └── ServiceCollectionExtensions.cs
+│   ├── Filters/ApiResponseTraceIdFilter.cs
+│   ├── HealthChecks/OracleHealthCheck.cs
+│   ├── Mappings/
+│   │   ├── AuthResponseMapping.cs
+│   │   └── UserResponseMapping.cs
+│   ├── Middlewares/
+│   │   ├── ExceptionHandlingMiddleware.cs
+│   │   └── TransactionLogMiddleware.cs
+│   ├── Modules/B2BWebApiModule.cs
+│   ├── Options/
+│   │   ├── B2BForwardedHeadersOptions.cs
+│   │   ├── RateLimitOptions.cs
+│   │   └── TransactionLogOptions.cs
+│   └── Properties/launchSettings.json
+└── B2B.Tests/
+    ├── B2B.Tests.csproj
+    ├── B2BWebApiFactory.cs
+    ├── AuthApiTests.cs
+    ├── AuthServiceTests.cs
+    ├── TestDoubles.cs
+    ├── TokenServiceTests.cs
+    ├── TransactionLogMiddlewareTests.cs
+    └── UsersApiTests.cs
+```
+
+## 專案職責與相依
+
+| 專案 | Target | 職責 | ProjectReference |
+| --- | --- | --- | --- |
+| `B2B.Conn` | `net10.0` | 連線 Profile、INI 密文、RSA/AES 金鑰與 Oracle 連線資料解析 | 無 |
+| `B2B.Domain` | `net10.0` | `UserDomain`、`ServiceDomain`、Token 與處理結果模型 | 無 |
+| `B2B.Dao` | `net10.0` | EF Core `B2BDbContext`、`UserEntity`、Oracle/User Repository | `B2B.Conn`、`B2B.Domain` |
+| `B2B.Service` | `net10.0` | `IAuthService`、`IUserService`、`ITokenService`、Options 與 Store 介面 | `B2B.Domain` |
+| `B2B.Service.Impl` | `net10.0` | Auth、JWT、User 查詢與 Refresh Token Store 實作 | `B2B.Service`、`B2B.Domain`、`B2B.Dao` |
+| `B2B.WebApi.Model` | `net10.0` | API Request/Response DTO 與 `ApiResponse<T>` | `B2B.Domain` |
+| `B2B.WebApi` | `net10.0` | Host、Controller、Middleware、JWT、Rate Limit、Swagger、Health Check | `B2B.Service`、`B2B.Service.Impl`、`B2B.WebApi.Model`、`B2B.Domain`、`B2B.Dao` |
+| `B2B.Tests` | `net10.0` | xUnit、Web API Factory、Service/Controller/Middleware 測試 | `B2B.Domain`、`B2B.Service`、`B2B.Service.Impl`、`B2B.WebApi`、`B2B.WebApi.Model` |
 
 ```mermaid
 flowchart LR
-    WebApi["B2B.WebApi"]
-    WebApiModel["B2B.WebApi.Model"]
-    Service["B2B.Service"]
-    ServiceImpl["B2B.Service.Impl"]
-    Domain["B2B.Domain"]
-    Dao["B2B.Dao"]
-    Conn["B2B.Conn"]
-    Tests["B2B.Tests"]
-
-    WebApi --> WebApiModel
-    WebApi --> Service
-    WebApi --> ServiceImpl
-    WebApi --> Dao
-    WebApi --> Domain
-
+    WebApi["B2B.WebApi"] --> WebApiModel["B2B.WebApi.Model"]
+    WebApi --> Service["B2B.Service"]
+    WebApi --> ServiceImpl["B2B.Service.Impl"]
+    WebApi --> Dao["B2B.Dao"]
     ServiceImpl --> Service
-    ServiceImpl --> Domain
     ServiceImpl --> Dao
+    ServiceImpl --> Domain["B2B.Domain"]
+    Dao --> Conn["B2B.Conn"]
     Dao --> Domain
-    Dao --> Conn
-
-    Tests --> WebApi
-    Tests --> WebApiModel
-    Tests --> Service
-    Tests --> ServiceImpl
-    Tests --> Domain
+    Service --> Domain
+    WebApiModel --> Domain
 ```
 
-相依方向原則：
+`B2B.WebApi` 是 Composition Root，只註冊 `B2BWebApiModule`；該 Module 再載入 `B2BDaoModule` 與 `B2BServiceModule`。DAO 會載入 `B2BConnModule`，因此連線解析不需要在 `Program.cs` 重複註冊。
 
-- `B2B.WebApi` 是 Composition Root，負責組裝所有 Module。
-- `B2B.Service` 只定義介面與 Options，不依賴實作層。
-- `B2B.Service.Impl` 的 AuthService 只負責服務憑證與 Token；UserService 則依賴 `B2B.Dao` 提供查詢。
-- `B2B.Dao` 依賴 `B2B.Conn` 取得 Oracle 連線資訊，供 User 查詢與 readiness health check 使用。
-- `B2B.Conn` 不需要被服務憑證驗證流程直接呼叫。
+## Web API 啟動與 Middleware
 
-## NuGet 相依關係
+`B2B.WebApi/Program.cs` 的實際順序如下：
 
-```mermaid
-flowchart TB
-    WebApi["B2B.WebApi"]
-    ServiceImpl["B2B.Service.Impl"]
-    Dao["B2B.Dao"]
-    Conn["B2B.Conn"]
-    Tests["B2B.Tests"]
+1. 建立 `WebApplicationBuilder`，切換 Autofac 與 NLog。
+2. 呼叫 `AddB2BOptions`、`AddB2BAuthentication`、`AddB2BRateLimiting`、`AddB2BSwagger`。
+3. `Build()` 後執行 `SecurityConfigurationValidator.Validate`。
+4. 依序加入 Forwarded Headers（啟用時）、HSTS（非 Development）、安全標頭、例外處理、交易紀錄。
+5. Development 才啟用 Swagger；接著啟用 HTTPS、Authentication、Authorization、Rate Limiter。
+6. 映射 `/health/live`、`/health/ready` 與 Controller。
 
-    Autofac["Autofac / Autofac.Extensions.DependencyInjection"]
-    JwtBearer["Microsoft.AspNetCore.Authentication.JwtBearer"]
-    Swagger["Microsoft.AspNetCore.OpenApi / Swashbuckle.AspNetCore"]
-    NLog["NLog.Web.AspNetCore"]
-    EF["Microsoft.EntityFrameworkCore"]
-    OracleEF["Oracle.EntityFrameworkCore"]
-    MemoryCache["Microsoft.Extensions.Caching.Memory"]
-    JwtToken["System.IdentityModel.Tokens.Jwt"]
-    Testing["xUnit / Microsoft.AspNetCore.Mvc.Testing / coverlet"]
+所有端點預設需要登入，`AuthController`、`HealthController` 與 Health Check 端點以 `[AllowAnonymous]` 或 `.AllowAnonymous()` 放行。
 
-    WebApi --> Autofac
-    WebApi --> JwtBearer
-    WebApi --> Swagger
-    WebApi --> NLog
-    WebApi --> OracleEF
-    WebApi --> EF
+## 設定與外部檔案
 
-    ServiceImpl --> Autofac
-    ServiceImpl --> MemoryCache
-    ServiceImpl --> JwtToken
+### JWT
 
-    Dao --> Autofac
-    Dao --> EF
-    Dao --> OracleEF
-
-    Conn --> Autofac
-    Tests --> Testing
-```
-
-主要套件用途：
-
-- Autofac：以 Module 管理跨專案 DI 註冊。
-- EF Core / Oracle.EntityFrameworkCore：建立 Oracle DbContext 與 Repository。
-- JwtBearer / System.IdentityModel.Tokens.Jwt：處理 JWT 驗證與 Token 產生。
-- NLog.Web.AspNetCore：應用程式與交易紀錄輸出。
-- Swashbuckle.AspNetCore：Development 環境 Swagger 文件。
-- xUnit / Mvc.Testing：測試 WebApi Host 與 API 行為。
-
-## Autofac Module 組裝流程
-
-```mermaid
-flowchart TB
-    Program["Program.cs<br/>UseServiceProviderFactory Autofac"]
-    WebApiModule["B2BWebApiModule"]
-    DaoModule["B2BDaoModule"]
-    ServiceModule["B2BServiceModule"]
-    ConnModule["B2BConnModule"]
-
-    Program --> WebApiModule
-    WebApiModule --> DaoModule
-    WebApiModule --> ServiceModule
-    DaoModule --> ConnModule
-
-    ConnModule --> ConnServices["B2B.Conn Services<br/>Profile / INI / Crypto / Facade"]
-    DaoModule --> DaoServices["DAO Services<br/>DbContext / Repository / Dao Options"]
-    ServiceModule --> AppServices["Application Services<br/>Auth / User / Token / RefreshTokenStore"]
-```
-
-`B2B.WebApi` 啟動時只註冊 `B2BWebApiModule`，再由此 Module 統一引入：
-
-- `B2BDaoModule`：資料存取與 Oracle 連線設定。
-- `B2BServiceModule`：應用服務、Token 與 Refresh Token Store。
-- `B2BConnModule`：由 `B2BDaoModule` 引入，用於解析 Oracle 帳密與連線端點。
-
-### Module 使用方式
-
-```mermaid
-flowchart TD
-    Program["Program.cs"]
-    RegisterRoot["RegisterModule<B2BWebApiModule>"]
-    WebApiModule["B2BWebApiModule.Load"]
-    RegisterDao["RegisterModule<B2BDaoModule>"]
-    RegisterService["RegisterModule<B2BServiceModule>"]
-    DaoModule["B2BDaoModule.Load"]
-    RegisterConn["RegisterModule<B2BConnModule>"]
-
-    Program --> RegisterRoot --> WebApiModule
-    WebApiModule --> RegisterDao --> DaoModule --> RegisterConn
-    WebApiModule --> RegisterService
-```
-
-`Program.cs` 只需要註冊 WebApi 根模組：
-
-```csharp
-builder.Host.UseServiceProviderFactory(new AutofacServiceProviderFactory());
-builder.Host.ConfigureContainer<ContainerBuilder>(containerBuilder =>
-    containerBuilder.RegisterModule<B2BWebApiModule>());
-```
-
-其他專案不需要在 `Program.cs` 個別註冊實作類別，由各自 Module 負責維護。
-
-## 啟動流程
-
-```mermaid
-flowchart TD
-    Start["dotnet run --project B2B.WebApi"]
-    Builder["建立 WebApplicationBuilder"]
-    Autofac["切換 DI Container 為 Autofac<br/>註冊 B2BWebApiModule"]
-    Config["讀取 appsettings 與環境設定"]
-    Options["AddB2BOptions"]
-    Auth["AddB2BAuthentication"]
-    RateLimit["AddB2BRateLimiting"]
-    Swagger["AddB2BSwagger"]
-    Build["Build WebApplication"]
-    Validate["SecurityConfigurationValidator.Validate"]
-    Pipeline["建立 Middleware Pipeline"]
-    Run["app.Run"]
-
-    Start --> Builder --> Autofac --> Config
-    Config --> Options --> Auth --> RateLimit --> Swagger --> Build --> Validate --> Pipeline --> Run
-```
-
-啟動時會在 `builder.Build()` 後執行安全設定檢查。非 Development 環境中特別會阻擋下列設定：
-
-- `DataAccess:UseFakeRepositories = true`
-- `TransactionLog:IncludeRequestBody = true`
-- `TransactionLog:IncludeResponseBody = true`
-- `AllowedHosts` 為空白或 `*`
-- JWT SecretKey 為空白、預設值或不安全佔位值
-
-## HTTP Pipeline
-
-```mermaid
-flowchart TD
-    Request["HTTP Request"]
-    SecurityHeaders["UseB2BSecurityHeaders"]
-    ExceptionHandling["UseB2BExceptionHandling"]
-    TransactionLog["UseB2BTransactionLog"]
-    Swagger["Swagger<br/>Development only"]
-    Https["UseHttpsRedirection"]
-    Authentication["UseAuthentication"]
-    Authorization["UseAuthorization"]
-    RateLimiter["UseRateLimiter"]
-    Health["MapHealthChecks<br/>/health/live<br/>/health/ready"]
-    Controllers["MapControllers"]
-    Response["HTTP Response"]
-
-    Request --> SecurityHeaders --> ExceptionHandling --> TransactionLog
-    TransactionLog --> Swagger --> Https --> Authentication --> Authorization --> RateLimiter
-    RateLimiter --> Health
-    RateLimiter --> Controllers
-    Health --> Response
-    Controllers --> Response
-```
-
-Middleware 重點：
-
-- Security Headers：加入基本安全回應標頭。
-- Exception Handling：集中處理未捕捉例外，回傳一致的 API 錯誤格式。
-- Transaction Log：記錄請求、回應、TraceId、耗時、Client IP、User-Agent。
-- HTTPS Redirection：將 HTTP 導向 HTTPS。
-- Authentication / Authorization：使用 JWT Bearer Token。
-- Rate Limiter：限制登入等敏感 API 的請求頻率。
-- Health Checks：提供 liveness 與 readiness 檢查。
-
-## 設定結構
-
-```mermaid
-flowchart TB
-    AppSettings["appsettings.json"]
-    Jwt["Jwt"]
-    DataAccess["DataAccess"]
-    B2BConn["DataAccess:B2BConn"]
-    TransactionLog["TransactionLog"]
-    RefreshTokenStore["RefreshTokenStore"]
-    AllowedHosts["AllowedHosts"]
-
-    AppSettings --> Jwt
-    AppSettings --> DataAccess
-    DataAccess --> B2BConn
-    AppSettings --> TransactionLog
-    AppSettings --> RefreshTokenStore
-    AppSettings --> AllowedHosts
-
-    B2BConn --> EnvType["EnvType"]
-    B2BConn --> SvrType["SvrType"]
-    B2BConn --> DBType["DBType"]
-    B2BConn --> AccType["AccType"]
-```
-
-目前 `appsettings.json` 不再需要 `ConnectionStrings`。  
-Oracle 連線一律透過下列設定交由 `B2B.Conn` 解析：
-
-```json
-{
-  "DataAccess": {
-    "UseFakeRepositories": false,
-    "B2BConn": {
-      "EnvType": "DEV",
-      "SvrType": "API",
-      "DBType": "B2B",
-      "AccType": "APP"
-    }
-  }
-}
-```
-
-### Jwt
+`B2B.WebApi/appsettings.json` 的目前結構：
 
 ```json
 {
   "Jwt": {
-    "Issuer": "B2B.WebApi",
-    "Audience": "B2B.Client",
-    "SecretKey": "請填入至少 32 字元的安全密鑰",
+    "Issuer": "B2B_API",
+    "Audience": "B2B_API_CLIENT",
+    "SecretKey": "",
     "AccessTokenMinutes": 60,
     "RefreshTokenDays": 7
   }
 }
 ```
 
-| 欄位 | 說明 |
-| --- | --- |
-| `Issuer` | JWT 簽發者 |
-| `Audience` | JWT 使用對象 |
-| `SecretKey` | HMAC 簽章密鑰，至少 32 字元 |
-| `AccessTokenMinutes` | Access Token 有效分鐘數 |
-| `RefreshTokenDays` | Refresh Token 有效天數 |
+Repository 中的 `SecretKey` 保持空白；執行時必須由安全設定來源提供，且不可使用空白或預設佔位值。JWT 使用 HMAC-SHA256，Claims 由 `ServiceDomain` 轉換為 `sub` 與 `service_name`。
 
-### TransactionLog
+### DataAccess
 
 ```json
 {
-  "TransactionLog": {
-    "Enabled": true,
-    "IncludeRequestBody": false,
-    "IncludeResponseBody": false,
-    "TrustForwardedHeaders": false,
-    "MaxBodyLogLength": 10000
+  "DataAccess": {
+    "UseFakeRepositories": false,
+    "B2BConn": {
+      "EnvType": "TEST",
+      "SvrType": "DEV",
+      "DBType": "INET",
+      "AccType": "ASI4"
+    }
   }
 }
 ```
 
-| 欄位 | 說明 |
-| --- | --- |
-| `Enabled` | 是否啟用交易紀錄 |
-| `IncludeRequestBody` | 是否記錄 Request Body，正式環境不建議啟用 |
-| `IncludeResponseBody` | 是否記錄 Response Body，正式環境不建議啟用 |
-| `TrustForwardedHeaders` | 是否信任反向代理傳入的 Forwarded Headers |
-| `MaxBodyLogLength` | Body 最大記錄長度 |
+Development 設定將 `UseFakeRepositories` 設為 `true`，使用 `InMemoryUserRepository`；Production 必須為 `false`，使用 Oracle `UserRepository`。DAO 會以 `B2B.Conn` 回傳的 `DataSource`、帳號與動態密碼組成 Oracle 連線字串。
 
-### RefreshTokenStore
+### B2B.Conn 外部資料
 
-```json
-{
-  "RefreshTokenStore": {
-    "Provider": "Memory"
-  }
-}
-```
-
-目前 Refresh Token Store 實作為記憶體版本，程式啟動後 Token 狀態保存在目前行程內。重啟服務後，既有 Refresh Token 狀態會消失。
-
-## B2B.Conn 連線解析流程
-
-```mermaid
-flowchart TD
-    DaoOptions["B2BDaoModule 建立 B2BDaoOptions"]
-    Config["讀取 DataAccess:B2BConn"]
-    Facade["B2B_Conn.GetEntityInfo<br/>EnvType / SvrType / DBType / AccType"]
-    Resolver["CredentialResolutionService"]
-    Profile["ConnectionProfileProvider<br/>比對連線設定檔"]
-    Month["MonthCredentialSelector<br/>依月份選擇 1 或 2"]
-    Ini["IniCredentialStore<br/>讀取 B2BConn1.ini 或 B2BConn2.ini"]
-    Keys["KeySetProvider<br/>讀取 C:\\B2B_Conn\\Other"]
-    Crypto["AesStringProtector<br/>解密 INI 內容"]
-    Parser["CredentialTextParser<br/>解析帳號與密碼"]
-    Formatter["PasswordFormatter<br/>組合月份密碼格式"]
-    Entity["Entity_Connection<br/>Host / Port / ServiceName / Account / Password"]
-    Oracle["Oracle ConnectionString"]
-
-    DaoOptions --> Config --> Facade --> Resolver --> Profile --> Month --> Ini
-    Ini --> Crypto
-    Keys --> Crypto
-    Crypto --> Parser --> Formatter --> Entity --> Oracle
-```
-
-`B2B.Conn` 保留外部呼叫介面，主要入口為：
-
-```csharp
-var entity = B2B_Conn.B2B_Conn.GetEntityInfo(envType, svrType, dbType, accType);
-```
-
-回傳結果會包含資料庫連線所需資訊，`B2B.Dao` 再將它轉為 EF Core Oracle 使用的格式：
+`B2B.Conn` 預設讀取 `C:\B2B_Conn\`，實際檔案不在 Git：
 
 ```text
-User Id={Account};
-Password={Password};
-Data Source={Host}:{Port}/{ServiceName};
-Pooling=true;
-Max Pool Size=100
+C:\B2B_Conn\
+├── B2BConn1.ini
+├── B2BConn2.ini
+└── Other\
+    ├── {8位英數}.der
+    ├── {8位英數}.public.pem
+    └── {8位英數}.private.pem
 ```
 
-### B2B.Conn 外部檔案需求
+`KeySetProvider` 會在 `Other` 找到最新的一組完整金鑰。`.der` 包含 RSA 加密的 AES Key/IV，RSA 私鑰用 PKCS#1 解密，INI 內容再以 AES-CBC/PKCS7 解密。`IniCredentialStore` 依月份讀取 `B2BConn1.ini` 或 `B2BConn2.ini`，再由 `CredentialTextParser` 與 `PasswordFormatter` 產生資料庫密碼。
 
-```mermaid
-flowchart TB
-    Root["C:\\B2B_Conn"]
-    Ini1["B2BConn1.ini"]
-    Ini2["B2BConn2.ini"]
-    Other["Other"]
-    Keys["解密 Key / IV 等必要檔案"]
+不要將外部 INI、RSA 私鑰、AES 金鑰、資料庫密碼或 JWT SecretKey 放入 Git 或交易 Log。
 
-    Root --> Ini1
-    Root --> Ini2
-    Root --> Other --> Keys
+## DAO → Service → WebApi 路徑
+
+User 查詢的現行路徑為：
+
+```text
+GET /api/users/{userId}
+    → UsersController
+        → IUserService
+            → UserService
+                → IUserRepository
+                    → UserRepository / InMemoryUserRepository
+                        → B2BDbContext → Oracle
 ```
 
-`B2B.Conn` 還原自 AWS 離線環境截圖，因此實際帳密、INI 與金鑰檔不會提交到 Git。部署或本機執行時，必須由環境提供 `C:\B2B_Conn` 相關檔案。
+`UsersController` 的兩個路由：
 
-## DAO 運作流程
+| Method | Route | 行為 |
+| --- | --- | --- |
+| `GET` | `/api/users/{userId:long}` | 透過 `IUserService.GetByIdAsync` 查詢 |
+| `GET` | `/api/users/by-account/{account}` | 透過 `IUserService.GetByAccountAsync` 查詢 |
 
-```mermaid
-flowchart TD
-    UserApi["UsersController"]
-    UserService["IUserService"]
-    RepoSwitch["B2BDaoModule 判斷<br/>UseFakeRepositories"]
-    Fake["InMemoryUserRepository"]
-    OracleRepo["UserRepository"]
-    Health["OracleHealthCheck"]
-    DbContext["B2BDbContext"]
-    ConnInfo["B2B.Conn 提供連線資訊"]
-    OracleDb["Oracle Database"]
+Service 回傳 `UserDomain?`；Controller 將結果交給 `UserResponseMapping` 轉成 `UserResponse`。回應只包含 `UserId`、`Account`、`DisplayName`、`IsActive`、`CreatedAt`，不包含 `PasswordHash`。
 
-    UserApi --> UserService --> RepoSwitch
-    RepoSwitch -->|true| Fake
-    RepoSwitch -->|false| OracleRepo --> DbContext
-    Health --> DbContext
-    ConnInfo --> DbContext
-    DbContext --> OracleDb
-```
+目前手動遷移標記位於：
 
-服務憑證登入與 User 查詢是兩條獨立流程：JWT 簽發不讀取 User Repository；已驗證的服務可透過 `IUserService` 查詢使用者。`DataAccess:UseFakeRepositories` 可讓開發與測試使用記憶體 Repository，正式環境必須為 `false`。
+| 標記 | 檔案 | 用途 |
+| --- | --- | --- |
+| `TODO[MIGRATE-DAO]` | `B2B.Service.Impl/Services/UserService.cs` | 對照舊版 DAO 查詢條件與資料存取差異 |
+| `TODO[MIGRATE-SERVICE]` | `B2B.Service.Impl/Services/UserService.cs` | 搬入啟用狀態、權限與其他商業規則 |
+| `TODO[MIGRATE-CONTROLLER]` | `B2B.WebApi/Controllers/UsersController.cs` | 搬入舊版輸入、權限與 HTTP 行為 |
+| `TODO[MIGRATE-RESPONSE]` | `B2B.WebApi/Controllers/UsersController.cs`、`B2B.WebApi/Mappings/UserResponseMapping.cs` | 搬入公開回應欄位 |
+| `TODO[MIGRATE-SECURITY]` | `B2B.WebApi/Mappings/UserResponseMapping.cs` | 確認敏感欄位永不輸出 |
 
-## 登入流程
+DAO 是本次遷移的固定邊界：搬移 Service 或 WebApi 時不要重建、改名或修改 `B2B.Dao` 的 Context、Entity、Mapping、Repository。
+
+## 憑證驗證 → JWT 路徑
+
+登入與 User 查詢是兩條獨立流程。登入不查詢 User Repository，也不以 `UserDomain` 作為 JWT 身分。
 
 ```mermaid
 sequenceDiagram
@@ -447,119 +298,78 @@ sequenceDiagram
     participant Token as TokenService
     participant Store as IRefreshTokenStore
 
-    Client->>Controller: POST /api/auth/login (credential)
+    Client->>Controller: POST /api/auth/login { credential }
     Controller->>Auth: LoginAsync(credential)
-    Auth->>Auth: TODO：接回舊版憑證驗證
+    Auth->>Auth: TODO：接回舊版憑證檔案/加密內容驗證
     Auth->>Token: 驗證成功後建立 ServiceDomain 並簽發 Token
-    Token-->>Auth: LoginResultDomain
+    Token-->>Auth: TokenDomain
     Auth->>Store: 儲存 Refresh Token
-    Auth-->>Controller: 登入結果
-    Controller-->>Client: ApiResponse LoginResponse
+    Auth-->>Controller: LoginResultDomain
+    Controller-->>Client: LoginResponse
 ```
 
-登入請求目前使用 `credential` 欄位。`AuthService.LoginAsync` 已保留登入驗證 TODO，尚未自行建立或讀取固定憑證檔案；將舊版憑證驗證搬入後，驗證成功的服務身分應建立 `ServiceDomain`，再呼叫既有 Token 流程。JWT 代表服務身分，不代表資料庫使用者。
+目前 `AuthService.LoginAsync` 會安全地回傳 `AUTHENTICATION_NOT_CONFIGURED`，直到舊版憑證驗證被搬入。完成驗證後，流程應為：
 
-## User 查詢流程
+1. `AuthController` 只接收 `LoginRequest.Credential`，不可在 Controller 讀檔或直接簽 Token。
+2. `AuthService.LoginAsync` 驗證呼叫端傳入的憑證內容。
+3. 驗證成功後建立已驗證的 `ServiceDomain`。
+4. 呼叫既有 `IssueTokenAsync`，由 `ITokenService` 產生 JWT 與 Refresh Token。
+5. 由 `IRefreshTokenStore` 保存 Refresh Token。
 
-`UsersController` 要求有效的 Service JWT，並透過 `IUserService` 查詢使用者。回應只包含 `UserId`、`Account`、`DisplayName`、`IsActive` 與 `CreatedAt`，絕不回傳 `PasswordHash`。
-
-| Method | Route | 說明 |
-| --- | --- | --- |
-| `GET` | `/api/users/{userId}` | 依使用者識別碼查詢 |
-| `GET` | `/api/users/by-account/{account}` | 依登入帳號查詢 |
-
-登入成功後會回傳：
-
-- Access Token：用於後續 API 的 Bearer Token。
-- Refresh Token：用於 Access Token 過期後換發新 Token。
-- 使用者基本資訊與 Token 到期時間。
-
-## Refresh Token 流程
-
-```mermaid
-sequenceDiagram
-    participant Client as Client
-    participant Controller as AuthController
-    participant Auth as AuthService
-    participant Store as IRefreshTokenStore
-    participant Token as TokenService
-
-    Client->>Controller: POST /api/auth/refresh-token
-    Controller->>Auth: RefreshTokenAsync(request)
-    Auth->>Store: 驗證並消耗舊 Refresh Token
-    Store-->>Auth: Token 記錄
-    Auth->>Token: 產生新 Access Token 與 Refresh Token
-    Auth->>Store: 儲存新 Refresh Token
-    Auth-->>Controller: 新 Token 結果
-    Controller-->>Client: ApiResponse LoginResponse
-```
-
-Refresh Token 採用輪替機制。舊 Token 使用後會失效，並由服務產生新的 Token 組合。
-
-## .NET Framework 4.8 手動遷移說明
-
-本方案的遷移目標是保留原本的分層呼叫方式，只將 .NET Framework 4.8 的商業邏輯接回目前的 .NET 專案。`B2B.Dao` 的 `DbContext`、Entity 與 Repository 已建立，手動遷移時不要重建或修改 DAO；先完成 `B2B.Service`、`B2B.Service.Impl`，再接 API。
-
-### 遷移前原則
-
-- DAO 不動：保留 `IUserRepository`、`UserRepository`、`B2BDbContext` 與既有 Entity 對應。
-- Service 不回傳 Web API DTO：Service 回傳 `UserDomain` 或 `LoginResultDomain`，DTO 只在 WebApi 層處理。
-- JWT 與 User 查詢分離：JWT 登入只驗證服務憑證並建立服務身分；User API 使用已驗證的 Service JWT 查詢資料庫使用者。
-- 憑證檔案／加密內容的實際驗證放入 `AuthService.LoginAsync` 的 TODO；不要在 Controller 或 DAO 直接驗證或簽發 Token。
-- `ServiceDomain` 必須保留，因為 JWT Claims 與 Refresh Token 都需要服務身分資料。
-
-### 路線一：DAO → Service → WebApi
-
-依下列順序搬移 .NET Framework 4.8 的 User 商業邏輯：
-
-1. 確認 `IUserRepository` 的兩個方法與舊版查詢條件一致。DAO 已完成時，只比對輸入、輸出與例外行為，不改 DAO 程式。
-2. 在 [`UserService.cs`](B2B.Service.Impl/Services/UserService.cs) 的 `GetByAccountAsync` 與 `GetByIdAsync` 中，保留 Repository 呼叫，將啟用狀態、權限、資料清理等舊版規則接在 `TODO[MIGRATE-DAO]` 與 `TODO[MIGRATE-SERVICE]` 位置。
-3. Service 只回傳 `UserDomain?`；找不到資料時回傳 `null`，不要在 Service 建立 `UserResponse`。
-4. 在 [`UsersController.cs`](B2B.WebApi/Controllers/UsersController.cs) 的 `TODO[MIGRATE-CONTROLLER]` 補上舊版輸入格式、權限與路由規則，但查詢仍只透過 `IUserService`。
-5. 在 [`UserResponseMapping.cs`](B2B.WebApi/Mappings/UserResponseMapping.cs) 的 `TODO[MIGRATE-RESPONSE]` 補上公開欄位映射；依 `TODO[MIGRATE-SECURITY]` 確認 `PasswordHash` 或其他敏感欄位永不輸出。
-
-完成後的執行路徑應保持：
-
-```text
-UsersController
-    → IUserService
-        → UserService
-            → IUserRepository
-                → B2BDbContext / Entity / Oracle
-```
-
-### 路線二：憑證驗證 → JWT
-
-1. 在 [`AuthService.cs`](B2B.Service.Impl/Services/AuthService.cs) 的 `LoginAsync` TODO 接回舊版憑證檔案、加密內容解析與比對。`credential` 是呼叫端傳入的完整憑證內容，不要在 Controller 讀檔或直接簽 Token。
-2. 驗證成功後建立已驗證的 `ServiceDomain`，再呼叫同一個 Service 內的 `IssueTokenAsync`。不要以 `UserDomain` 代替服務身分，也不要查詢 User Repository 來完成登入。
-3. `IssueTokenAsync` 會透過 `ITokenService` 產生 Access Token，並透過 `IRefreshTokenStore` 保存 Refresh Token；Refresh Token 與 Logout 流程維持現有實作。
-4. [`AuthController.cs`](B2B.WebApi/Controllers/AuthController.cs) 只負責接收 `LoginRequest.Credential`、呼叫 `IAuthService` 與轉換回應。舊版額外回應欄位請依 Controller 中的 TODO 接回。
-5. 驗證尚未搬入前，登入會回傳 `AUTHENTICATION_NOT_CONFIGURED`；這是目前刻意保留的安全停靠狀態，不代表 JWT 服務流程需要改寫。
-
-登入請求格式：
+API 請求模型為：
 
 ```json
 {
-  "credential": "<舊版驗證所需的加密憑證內容>"
+  "credential": "<由離線環境提供的加密憑證內容>"
 }
 ```
 
-實際憑證檔案的路徑、AES 金鑰管理與部署方式由離線環境提供；不要將真實密文、金鑰或密碼提交到 Git，也不要寫入交易 Log。
+目前方案不包含 `Entry.ini` 與 `EntryCredentialValidator`；憑證檔案與加密內容的實際驗證接點只保留在 `AuthService.LoginAsync` TODO。
 
-### TODO 對照表
+Refresh Token API：
 
-| 標記 | 位置 | 搬移內容 |
+| Method | Route | 行為 |
 | --- | --- | --- |
-| `TODO[MIGRATE-DAO]` | `UserService` | 舊版 DAO 查詢條件與資料存取差異 |
-| `TODO[MIGRATE-SERVICE]` | `UserService` | 啟用狀態、權限與其他商業規則 |
-| `TODO[MIGRATE-CONTROLLER]` | `UsersController` | 輸入格式、權限與 HTTP 行為 |
-| `TODO[MIGRATE-RESPONSE]` | `UsersController` / `UserResponseMapping` | 舊版 API 公開欄位映射 |
-| `TODO[MIGRATE-SECURITY]` | `UserResponseMapping` | 敏感欄位排除檢查 |
-| `TODO` | `AuthService` / `AuthController` | 舊版憑證驗證與登入回應欄位 |
+| `POST` | `/api/auth/refresh-token` | Consume 舊 Refresh Token，驗證後輪替並簽發新 Token |
+| `POST` | `/api/auth/logout` | 移除指定 Refresh Token |
 
-### 每次手動搬移後的檢查
+Refresh Token 目前由 `MemoryRefreshTokenStore` 保存；行程重啟後狀態會消失。
+
+## API 回應、安全與健康檢查
+
+- Controller 使用 `ApiResponse<T>` 統一包裝成功、錯誤與 `TraceId`。
+- Model validation 失敗會回傳 `VALIDATION_FAILED` 與欄位錯誤。
+- `ExceptionHandlingMiddleware` 統一處理未捕捉例外。
+- `TransactionLogMiddleware` 可記錄 TraceId、路徑、狀態碼與耗時；敏感欄位名稱由設定遮罩，Request/Response Body 預設不記錄。
+- Auth API 套用 `RateLimiting:Auth`，預設每個 Client IP/User-Agent 每 60 秒 5 次，超過回傳 `429 RATE_LIMITED`。
+- `/health/live` 只檢查行程存活；`/health/ready` 執行 `OracleHealthCheck`，檢查 `B2BDbContext.Database.CanConnectAsync`。
+- 非 Development 啟動時會拒絕 Fake Repository、Request/Response Body Log，以及空白或 `*` 的 `AllowedHosts`；JWT SecretKey 永遠必須有效。
+
+## .NET Framework 4.8 手動遷移步驟
+
+### 1. 先確認固定邊界
+
+只搬移 `B2B.Service`、`B2B.Service.Impl`，必要時再搬 `B2B.WebApi` 的 Controller/Mapping。`B2B.Dao` 不改，先比對 `IUserRepository` 的輸入、輸出與例外行為。
+
+### 2. 搬移 User 商業邏輯
+
+1. 將舊版 DAO 呼叫後的查詢規則接到 `UserService.GetByAccountAsync` 與 `GetByIdAsync` 的 `TODO[MIGRATE-DAO]` / `TODO[MIGRATE-SERVICE]`。
+2. Service 只回傳 `UserDomain?`，不要建立或回傳 `UserResponse`。
+3. 將舊版 Controller 的輸入格式、權限與 HTTP 行為接到 `UsersController` 的 `TODO[MIGRATE-CONTROLLER]`。
+4. 將公開欄位接到 `UserResponseMapping` 的 `TODO[MIGRATE-RESPONSE]`，並依 `TODO[MIGRATE-SECURITY]` 排除密碼雜湊與其他敏感資料。
+
+### 3. 搬移憑證驗證與 JWT
+
+1. 在 `AuthService.LoginAsync` 的 TODO 接回舊版憑證檔案、加密內容解析與比對。
+2. 驗證成功後建立 `ServiceDomain`，不要建立 `UserDomain` 或查詢 User Repository。
+3. 呼叫 `IssueTokenAsync`，保留 `TokenService`、`MemoryRefreshTokenStore`、Refresh Token 輪替與 Logout 行為。
+4. `AuthController` 只負責請求模型、服務呼叫與回應映射；舊版額外回應欄位接到現有 Controller/Mapping TODO。
+5. 不要把真正密文、金鑰、密碼或 JWT SecretKey 提交到 Git。
+
+### 4. 每次搬移後檢查
 
 ```powershell
+dotnet restore B2B_API.sln
 dotnet build B2B_API.sln --no-restore
 dotnet test B2B_API.sln --no-restore --verbosity minimal
 rg -n "TODO(\[MIGRATE-[A-Z-]+\])?" B2B.Service B2B.Service.Impl B2B.WebApi
@@ -567,192 +377,27 @@ git diff --check
 git diff --name-only -- B2B.Dao
 ```
 
-最後一個指令應沒有輸出；若 DAO 出現差異，先停止搬移並確認是否誤改資料存取層。完成 User Service 與 Auth Service 的邏輯接回後，再進行 WebApi 的實際 Oracle、JWT 與端到端驗證。
+最後一個指令應沒有輸出。若 `B2B.Dao` 出現差異，先停止搬移並確認是否誤改固定資料存取邊界。測試環境可使用 `UseFakeRepositories=true`；實際 Oracle、外部金鑰與完整 JWT 登入流程仍需在對應環境驗證。
 
-## 登出流程
+## Visual Studio 方案總管
 
-```mermaid
-sequenceDiagram
-    participant Client as Client
-    participant Controller as AuthController
-    participant Auth as AuthService
-    participant Store as IRefreshTokenStore
+`B2B_API.sln` 的 Solution Items 會指向根目錄 `README.md`：
 
-    Client->>Controller: POST /api/auth/logout
-    Controller->>Auth: LogoutAsync(request)
-    Auth->>Store: 撤銷 Refresh Token
-    Store-->>Auth: 撤銷結果
-    Auth-->>Controller: 登出結果
-    Controller-->>Client: ApiResponse
+```text
+方案
+└── Solution Items
+    └── README.md
 ```
 
-登出會使指定 Refresh Token 失效。Access Token 因為是 JWT，仍會在原本效期內自然過期；需要立即封鎖時，需再加入 Token 黑名單或版本號檢查機制。
+因此在 Visual Studio 2026 開啟 `B2B_API.sln` 後，可以直接從方案總管開啟根目錄 README。專案資料夾內不再放置重複 README。
 
-## 例外與交易紀錄流程
-
-```mermaid
-flowchart TD
-    Request["Request"]
-    TransactionStart["TransactionLogMiddleware<br/>建立 TraceId 與開始時間"]
-    SensitiveMask["敏感欄位遮罩"]
-    Next["呼叫下一個 Middleware / Controller"]
-    Exception["ExceptionHandlingMiddleware<br/>捕捉未處理例外"]
-    Log["ILogger / TransactionLogger"]
-    Response["一致 API Response"]
-
-    Request --> TransactionStart --> SensitiveMask --> Next
-    Next -->|成功| Log --> Response
-    Next -->|例外| Exception --> Log --> Response
-```
-
-交易紀錄會記錄：
-
-- TraceId
-- HTTP Method、Path、QueryString
-- Status Code
-- Client IP、User-Agent
-- Request / Response 時間
-- Elapsed Milliseconds
-- 選擇性 Request Body / Response Body
-
-敏感資料會在寫入紀錄前遮罩，避免密碼、Token 等資訊直接出現在 Log 中。
-
-## Health Check 流程
-
-```mermaid
-flowchart LR
-    Live["GET /health/live"]
-    Ready["GET /health/ready"]
-    Self["self check"]
-    OracleCheck["OracleHealthCheck"]
-    DbContext["B2BDbContext.Database.CanConnectAsync"]
-    Oracle["Oracle Database"]
-
-    Live --> Self
-    Ready --> OracleCheck --> DbContext --> Oracle
-```
-
-| Endpoint | 用途 | 檢查內容 |
-| --- | --- | --- |
-| `/health/live` | Liveness | API 行程是否存活 |
-| `/health/ready` | Readiness | API 是否可連線至 Oracle |
-
-## API 回應格式
-
-```mermaid
-flowchart TB
-    ApiResponse["ApiResponse of T"]
-    Success["Success"]
-    Data["Data"]
-    Error["Error"]
-    TraceId["TraceId"]
-
-    ApiResponse --> Success
-    ApiResponse --> Data
-    ApiResponse --> Error
-    ApiResponse --> TraceId
-```
-
-API 回應會透過共用格式包裝，成功與失敗皆會保留一致結構，方便前端或呼叫端統一處理。
-
-## Rate Limit 流程
-
-```mermaid
-flowchart TD
-    Request["受限制 API Request"]
-    Key["依 Client IP + User-Agent 建立 Partition Key"]
-    Window["Fixed Window<br/>每分鐘限制次數"]
-    Pass["允許通過"]
-    Reject["回傳 429<br/>ApiResponse RATE_LIMITED"]
-
-    Request --> Key --> Window
-    Window -->|未超過| Pass
-    Window -->|超過| Reject
-```
-
-目前登入等敏感 API 可套用 Rate Limit，避免短時間大量嘗試。
-
-## 本機執行
-
-### 還原套件
+## 本機執行與測試
 
 ```powershell
-dotnet restore
+dotnet restore B2B_API.sln
+dotnet build B2B_API.sln --no-restore
+dotnet test B2B_API.sln --no-restore --verbosity minimal
+dotnet run --project B2B.WebApi/B2B.WebApi.csproj
 ```
 
-### 建置
-
-```powershell
-dotnet build
-```
-
-### 啟動 Web API
-
-```powershell
-dotnet run --project B2B.WebApi
-```
-
-若要讓 `dotnet run` 同時啟動 HTTPS，請確認 `B2B.WebApi/Properties/launchSettings.json` 的 `applicationUrl` 包含 `https://...`，並且本機已信任 ASP.NET Core 開發憑證：
-
-```powershell
-dotnet dev-certs https --trust
-```
-
-## 測試
-
-```powershell
-dotnet test
-```
-
-測試專案會使用 `B2BWebApiFactory` 覆寫部分設定，避免測試環境依賴正式環境的 Oracle 連線資訊。
-
-## 部署注意事項
-
-```mermaid
-flowchart TD
-    Deploy["部署前檢查"]
-    Jwt["設定安全 Jwt SecretKey"]
-    Hosts["設定明確 AllowedHosts"]
-    Fake["關閉 UseFakeRepositories"]
-    BodyLog["關閉 Request / Response Body Log"]
-    ConnFiles["提供 C:\\B2B_Conn 檔案"]
-    Https["確認 HTTPS 與憑證"]
-    Health["確認 /health/ready 通過"]
-
-    Deploy --> Jwt --> Hosts --> Fake --> BodyLog --> ConnFiles --> Https --> Health
-```
-
-正式環境至少應確認：
-
-- `Jwt:SecretKey` 已改為安全密鑰。
-- `AllowedHosts` 不可為 `*`。
-- `DataAccess:UseFakeRepositories` 必須為 `false`。
-- `TransactionLog:IncludeRequestBody` 與 `IncludeResponseBody` 必須為 `false`。
-- `C:\B2B_Conn` 下的 INI 與金鑰檔案已由環境提供。
-- `/health/ready` 可以正常連線 Oracle。
-
-## 設計重點
-
-```mermaid
-flowchart TB
-    Modular["模組化"]
-    Config["設定集中"]
-    Security["正式環境安全檢查"]
-    Conn["連線資訊由 B2B.Conn 提供"]
-    Api["一致 API 回應格式"]
-    Logs["交易紀錄與 TraceId"]
-
-    Modular --> Config
-    Config --> Conn
-    Config --> Security
-    Security --> Api
-    Api --> Logs
-```
-
-整體設計目標：
-
-- 使用 Autofac Module 降低註冊邏輯散落。
-- 使用 `B2B.Conn` 集中處理 AWS 離線環境的連線帳密解析。
-- 讓 `appsettings.json` 不保存 Oracle 連線字串。
-- 讓 WebApi 啟動時即檢查正式環境高風險設定。
-- 讓 API 回應、例外處理、交易紀錄與健康檢查保持一致。
+Development 啟動會使用記憶體 User Repository，但仍需要測試用 JWT SecretKey；若要使用實際 Oracle，請提供 `C:\B2B_Conn` 外部檔案、關閉 Fake Repository，並確認 `/health/ready` 通過。
