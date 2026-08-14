@@ -8,6 +8,14 @@ namespace B2B.Service.Interfaces;
 public interface IUserService
 {
     /// <summary>
+    /// 依可選條件查詢使用者清單。
+    /// </summary>
+    /// <param name="find">使用者清單查詢條件。</param>
+    /// <param name="cancellationToken">取消權杖。</param>
+    /// <returns>符合條件的使用者清單。</returns>
+    Task<IReadOnlyList<UserDomain>> GetListAsync(UserFind? find, CancellationToken cancellationToken);
+
+    /// <summary>
     /// 依登入帳號查詢使用者。
     /// </summary>
     /// <param name="account">登入帳號。</param>

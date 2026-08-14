@@ -79,6 +79,7 @@ B2B_API/
 │   ├── RefreshTokenDomain.cs
 │   ├── ServiceDomain.cs
 │   ├── TokenDomain.cs
+│   ├── UserFind.cs
 │   ├── UserDomain.cs
 │   └── Models/RefreshTokenModel.cs
 ├── B2B.Service/
@@ -157,7 +158,7 @@ B2B_API/
 | 專案 | Target | 職責 | ProjectReference |
 | --- | --- | --- | --- |
 | `B2B.Conn` | `net10.0` | 連線 Profile、INI 密文、RSA/AES 金鑰與 Oracle 連線資料解析 | 無 |
-| `B2B.Domain` | `net10.0` | `UserDomain`、`ServiceDomain`、Token 與處理結果模型 | 無 |
+| `B2B.Domain` | `net10.0` | `UserDomain`、`UserFind`、`ServiceDomain`、Token 與處理結果模型 | 無 |
 | `B2B.Dao` | `net10.0` | EF Core `B2BDbContext`、`UserEntity`、Oracle/User Repository | `B2B.Conn`、`B2B.Domain` |
 | `B2B.Service` | `net10.0` | `IAuthService`、`IUserService`、`ITokenService`、Options 與 Store 介面 | `B2B.Domain` |
 | `B2B.Service.Impl` | `net10.0` | Auth、JWT、User 查詢與 Refresh Token Store 實作 | `B2B.Service`、`B2B.Domain`、`B2B.Dao` |
@@ -265,10 +266,37 @@ GET /api/users/{userId}
                         → B2BDbContext → Oracle
 ```
 
-`UsersController` 的兩個路由：
+使用者清單查詢使用 `B2B.Domain.UserFind` 作為可選條件：
+
+```csharp
+var users = await userRepository.GetListAsync(
+    new UserFind
+    {
+        Account = "adm",
+        IsActive = true
+    },
+    cancellationToken);
+```
+
+`UserFind` 的 `UserId`、`Account`、`DisplayName`、`IsActive`、`CreatedAtFrom` 與 `CreatedAtTo` 都是可選欄位。傳入 `null` 或空白條件物件時不套用篩選，直接回傳完整清單；文字條件採不分大小寫部分符合。
+
+以 POST 取得多筆使用者的範例：
+
+```http
+POST /api/users/search
+Content-Type: application/json
+
+{
+  "account": "adm",
+  "isActive": true
+}
+```
+
+`UsersController` 的路由：
 
 | Method | Route | 行為 |
 | --- | --- | --- |
+| `POST` | `/api/users/search` | 透過 `IUserService.GetListAsync` 依 Body 條件查詢多筆使用者 |
 | `GET` | `/api/users/{userId:long}` | 透過 `IUserService.GetByIdAsync` 查詢 |
 | `GET` | `/api/users/by-account/{account}` | 透過 `IUserService.GetByAccountAsync` 查詢 |
 

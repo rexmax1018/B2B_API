@@ -1,3 +1,4 @@
+using B2B.Domain;
 using B2B.Service.Interfaces;
 using B2B.WebApi.Mappings;
 using B2B.WebApi.Model.Common;
@@ -15,6 +16,24 @@ namespace B2B.WebApi.Controllers;
 [Route("api/users")]
 public sealed class UsersController(IUserService userService) : ControllerBase
 {
+    /// <summary>
+    /// 依可選條件以 POST 查詢多筆使用者。
+    /// </summary>
+    /// <param name="find">使用者清單查詢條件；未提供條件時回傳完整清單。</param>
+    /// <param name="cancellationToken">取消權杖。</param>
+    /// <returns>符合條件的使用者清單。</returns>
+    [HttpPost("search")]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<UserResponse>>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<UserResponse>>>> Search(
+        [FromBody] UserFind? find,
+        CancellationToken cancellationToken)
+    {
+        var users = await userService.GetListAsync(find, cancellationToken);
+        var responses = users.Select(user => user.ToUserResponse()).ToArray();
+
+        return Ok(ApiResponse<IReadOnlyList<UserResponse>>.Ok(responses));
+    }
+
     /// <summary>
     /// 依使用者識別碼查詢使用者。
     /// </summary>

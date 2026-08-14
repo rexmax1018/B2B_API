@@ -11,6 +11,16 @@ namespace B2B.Service.Impl.Services;
 public sealed class UserService(IUserRepository userRepository) : IUserService
 {
     /// <inheritdoc />
+    public async Task<IReadOnlyList<UserDomain>> GetListAsync(UserFind? find, CancellationToken cancellationToken)
+    {
+        // TODO[MIGRATE-DAO]: 將舊版清單的篩選、排序與分頁規則接到此範例。
+        var users = await userRepository.GetListAsync(find, cancellationToken);
+
+        // TODO[MIGRATE-SERVICE]: 搬入舊版清單查詢的啟用狀態、權限或其他商業規則。
+        return users;
+    }
+
+    /// <inheritdoc />
     public async Task<UserDomain?> GetByAccountAsync(string account, CancellationToken cancellationToken)
     {
         // TODO[MIGRATE-DAO]: 保留此 IUserRepository 呼叫，將 .NET Framework 4.8 的帳號查詢規則接在回傳結果之後。
