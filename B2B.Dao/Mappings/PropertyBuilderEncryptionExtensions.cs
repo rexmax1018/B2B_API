@@ -20,6 +20,7 @@ public static class PropertyBuilderEncryptionExtensions
     /// 此 API 不適合用於 WHERE 等值查詢、LIKE、Contains、StartsWith、EndsWith、JOIN、
     /// 依明文語意排序、唯一明文約束或一般資料庫索引查找。呼叫端仍須自行管理欄位容量；
     /// AES-GCM envelope 與 Base64 會使資料庫儲存長度大於明文長度。NULL 會維持 NULL，
+    /// 空字串也遵循 CryptoLib 2.0.0 的既有行為轉為 NULL；若兩者語意不同，呼叫端應先驗證。
     /// 且本轉換器不提供既有明文 fallback 或自動遷移。
     /// </remarks>
     /// <param name="propertyBuilder">要套用轉換器的字串屬性。</param>

@@ -274,7 +274,8 @@ entity.Property(x => x.SomeSensitiveValue)
 `WHERE =`、`LIKE`、`Contains`、`StartsWith`、`EndsWith`、`JOIN`、依明文語意排序、唯一明文
 約束或一般明文索引查找；CryptoLib 使用 randomized AES-GCM，同一明文每次密文都不同。
 `NULL` 仍是 `NULL`，轉換器採 strict encrypted contract，不提供既有明文 fallback 或自動
-遷移。AES-GCM envelope 與 Base64 會增加資料庫儲存長度，因此呼叫端必須明確管理
+遷移；空字串依 CryptoLib 2.0.0 既有行為也會轉為 `NULL`，若兩者語意不同應先驗證。
+AES-GCM envelope 與 Base64 會增加資料庫儲存長度，因此呼叫端必須明確管理
 `HasMaxLength`/`ColumnType` 與 Oracle 欄位容量。
 
 本次整合只建立 mapping infrastructure，不會替 `UserEntity.Account`、`DisplayName` 或

@@ -109,6 +109,13 @@ public sealed class CryptoIntegrationTests : IClassFixture<CryptoTestFixture>
 
         Assert.NotNull(property.GetValueConverter());
         Assert.False(property.IsNullable);
+
+        var nullableProperty = context.Model
+            .FindEntityType(typeof(EncryptionTestEntity))!
+            .FindProperty(nameof(EncryptionTestEntity.OptionalSecret))!;
+
+        Assert.NotNull(nullableProperty.GetValueConverter());
+        Assert.True(nullableProperty.IsNullable);
     }
 
     /// <summary>
@@ -123,7 +130,7 @@ public sealed class CryptoIntegrationTests : IClassFixture<CryptoTestFixture>
         using var context = CreateContext();
         var property = context.Model
             .FindEntityType(typeof(EncryptionTestEntity))!
-            .FindProperty(nameof(EncryptionTestEntity.Secret))!;
+            .FindProperty(nameof(EncryptionTestEntity.OptionalSecret))!;
         var converter = property.GetValueConverter();
         Assert.NotNull(converter);
         const string plainText = "converter-round-trip-secret";
@@ -139,6 +146,7 @@ public sealed class CryptoIntegrationTests : IClassFixture<CryptoTestFixture>
         Assert.Equal(plainText, restored);
         Assert.Null(converter.ConvertToProvider(null));
         Assert.Null(converter.ConvertFromProvider(null));
+        Assert.Null(converter.ConvertToProvider(string.Empty));
         Assert.Throws<ArgumentException>(() =>
         {
             _ = converter.ConvertFromProvider("existing-plaintext");
@@ -165,7 +173,7 @@ public sealed class CryptoIntegrationTests : IClassFixture<CryptoTestFixture>
                     .HasColumnName("TEST_SECRET")
                     .HasB2BEncryption()
                     .IsRequired();
-                entity.Property(x => x.OptionalSecret)
+                entity.Property(x => x.OptionalSecret!)
                     .HasColumnName("TEST_OPTIONAL_SECRET")
                     .HasB2BEncryption();
             });
@@ -178,7 +186,7 @@ public sealed class CryptoIntegrationTests : IClassFixture<CryptoTestFixture>
 
         public string Secret { get; set; } = string.Empty;
 
-        public string OptionalSecret { get; set; } = string.Empty;
+        public string? OptionalSecret { get; set; }
     }
 }
 
