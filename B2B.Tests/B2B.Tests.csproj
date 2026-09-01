@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\B2B.Domain\B2B.Domain.csproj" />
+    <ProjectReference Include="..\B2B.Dao\B2B.Dao.csproj" />
     <ProjectReference Include="..\B2B.Service\B2B.Service.csproj" />
     <ProjectReference Include="..\B2B.Service.Impl\B2B.Service.Impl.csproj" />
     <ProjectReference Include="..\B2B.WebApi\B2B.WebApi.csproj" />

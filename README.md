@@ -62,7 +62,9 @@ B2B_API/
 │   ├── B2B.Dao.csproj
 │   ├── Contexts/B2BDbContext.cs
 │   ├── Entities/UserEntity.cs
+│   ├── Extensions/CryptoConfigurationExtensions.cs
 │   ├── Mappings/
+│   │   ├── PropertyBuilderEncryptionExtensions.cs
 │   │   ├── UserEntityMapping.cs
 │   │   └── UserEntityMappingExtensions.cs
 │   ├── Modules/
@@ -147,6 +149,7 @@ B2B_API/
     ├── B2BWebApiFactory.cs
     ├── AuthApiTests.cs
     ├── AuthServiceTests.cs
+    ├── CryptoIntegrationTests.cs
     ├── TestDoubles.cs
     ├── TokenServiceTests.cs
     ├── TransactionLogMiddlewareTests.cs
@@ -159,7 +162,7 @@ B2B_API/
 | --- | --- | --- | --- |
 | `B2B.Conn` | `net10.0` | 連線 Profile、INI 密文、RSA/AES 金鑰與 Oracle 連線資料解析 | 無 |
 | `B2B.Domain` | `net10.0` | `UserDomain`、`UserFind`、`ServiceDomain`、Token 與處理結果模型 | 無 |
-| `B2B.Dao` | `net10.0` | EF Core `B2BDbContext`、`UserEntity`、Oracle/User Repository | `B2B.Conn`、`B2B.Domain` |
+| `B2B.Dao` | `net10.0` | EF Core `B2BDbContext`、`UserEntity`、Oracle/User Repository、CryptoLib field mapping | `B2B.Conn`、`B2B.Domain` |
 | `B2B.Service` | `net10.0` | `IAuthService`、`IUserService`、`ITokenService`、Options 與 Store 介面 | `B2B.Domain` |
 | `B2B.Service.Impl` | `net10.0` | Auth、JWT、User 查詢與 Refresh Token Store 實作 | `B2B.Service`、`B2B.Domain`、`B2B.Dao` |
 | `B2B.WebApi.Model` | `net10.0` | API Request/Response DTO 與 `ApiResponse<T>` | `B2B.Domain` |
@@ -176,6 +179,7 @@ flowchart LR
     ServiceImpl --> Dao
     ServiceImpl --> Domain["B2B.Domain"]
     Dao --> Conn["B2B.Conn"]
+    Dao --> Crypto["B2B.CryptoLib 2.0.0"]
     Dao --> Domain
     Service --> Domain
     WebApiModel --> Domain
@@ -187,7 +191,7 @@ flowchart LR
 
 `B2B.WebApi/Program.cs` 的實際順序如下：
 
-1. 建立 `WebApplicationBuilder`，切換 Autofac 與 NLog。
+1. 建立 `WebApplicationBuilder`，依 `Crypto:Enabled` 初始化可選的 CryptoLib default client，再切換 Autofac 與 NLog。
 2. 呼叫 `AddB2BOptions`、`AddB2BAuthentication`、`AddB2BRateLimiting`、`AddB2BSwagger`。
 3. `Build()` 後執行 `SecurityConfigurationValidator.Validate`。
 4. 依序加入 Forwarded Headers（啟用時）、HSTS（非 Development）、安全標頭、例外處理、交易紀錄。
@@ -233,6 +237,57 @@ Repository 中的 `SecretKey` 保持空白；執行時必須由安全設定來�
 ```
 
 Development 設定將 `UseFakeRepositories` 設為 `true`，使用 `InMemoryUserRepository`；Production 必須為 `false`，使用 Oracle `UserRepository`。DAO 會以 `B2B.Conn` 回傳的 `DataSource`、帳號與動態密碼組成 Oracle 連線字串。
+
+### Database field encryption
+
+`B2B.Dao` 以 `PackageReference` 依賴 `B2B.CryptoLib` 2.0.0。CryptoLib 不會由 runtime
+自行讀取 `appsettings.json`；B2B API 只在 `Crypto:Enabled` 為 `true` 時，在啟動期間以
+`builder.Environment.ContentRootPath` 為基準初始化一次 default client：
+
+```json
+{
+  "Crypto": {
+    "Enabled": false,
+    "KeyManagerBasePath": "",
+    "ActiveUnifiedName": ""
+  }
+}
+```
+
+啟用時 `KeyManagerBasePath` 與 `ActiveUnifiedName` 不可為空白。相對的
+`KeyManagerBasePath` 會解析為 `<content-root>/<configured-path>`；絕對路徑則保持為絕對路徑。
+金鑰目錄由 CryptoLib 管理，設定只放路徑與 active unified name，不放 AES key 或 RSA
+private/public key。正常啟動只呼叫 `Crypto.Initialize`，不會自動執行
+`Crypto.UpdateKeySetsAsync()`。
+
+對確定不需要資料庫搜尋的敏感字串欄位，可在 DAO mapping 使用：
+
+```csharp
+entity.Property(x => x.SomeSensitiveValue)
+    .HasColumnName("SENSITIVE_VALUE")
+    .HasB2BEncryption()
+    .IsRequired();
+```
+
+這個 extension 透過 EF Core `ValueConverter` 將明文轉為 CryptoLib 的
+`Base64(payload).unifiedName` 格式，讀取時再還原明文。它只適合 storage/retrieval，不適合
+`WHERE =`、`LIKE`、`Contains`、`StartsWith`、`EndsWith`、`JOIN`、依明文語意排序、唯一明文
+約束或一般明文索引查找；CryptoLib 使用 randomized AES-GCM，同一明文每次密文都不同。
+`NULL` 仍是 `NULL`，轉換器採 strict encrypted contract，不提供既有明文 fallback 或自動
+遷移；空字串依 CryptoLib 2.0.0 既有行為也會轉為 `NULL`，若兩者語意不同應先驗證。
+AES-GCM envelope 與 Base64 會增加資料庫儲存長度，因此呼叫端必須明確管理
+`HasMaxLength`/`ColumnType` 與 Oracle 欄位容量。
+
+本次整合只建立 mapping infrastructure，不會替 `UserEntity.Account`、`DisplayName` 或
+`PasswordHash` 加密，也不會新增 dummy 欄位、migration、DDL 或改變既有 User schema。這些欄位
+目前分別依賴 equality/Contains/LIKE、搜尋語意或 password hash；若未來要支援可搜尋的加密
+欄位，應另行設計 searchable encryption 或 blind index。既有 plaintext 欄位的轉換也應另開
+migration 工作，不可在 converter 中猜測資料格式。
+
+測試金鑰只放在測試暫存目錄；production key files、AES/RSA key material 與外部 key
+directory 不可提交到 Git。正式部署仍需將 `B2B.CryptoLib.2.0.0.nupkg` 發布至 organization
+或 offline NuGet source；repository 不依賴 sibling-folder `ProjectReference` 或 machine-specific
+feed 設定。
 
 ### B2B.Conn 外部資料
 

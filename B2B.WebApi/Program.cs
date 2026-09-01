@@ -1,5 +1,6 @@
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
+using B2B.Dao.Extensions;
 using B2B.WebApi.Modules;
 using B2B.WebApi.Extensions;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -13,6 +14,8 @@ try
     logger.Info("B2B_API 正在啟動。");
 
     var builder = WebApplication.CreateBuilder(args);
+
+    builder.Configuration.InitializeB2BCrypto(builder.Environment.ContentRootPath);
 
     builder.Host.UseServiceProviderFactory(new AutofacServiceProviderFactory());
     builder.Host.ConfigureContainer<ContainerBuilder>(containerBuilder =>
